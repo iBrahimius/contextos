@@ -1,0 +1,140 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>ContextOS</title>
+    <link rel="stylesheet" href="/dashboard.css" />
+  </head>
+  <body>
+    <div class="shell">
+      <header class="hero card">
+        <div>
+          <p class="eyebrow">Local-first agent memory</p>
+          <h1>ContextOS</h1>
+          <p class="lede">
+            Live knowledge extraction, greedy graph-aware retrieval, local SQLite persistence, and proxy telemetry in one runtime.
+          </p>
+        </div>
+        <div class="hero-meter">
+          <div class="meter-card">
+            <span class="meter-label">Retrieval posture</span>
+            <strong id="retrieval-posture">Aggressive</strong>
+            <span class="meter-subtle">No token budgets. Meter consumption instead.</span>
+          </div>
+        </div>
+      </header>
+
+      <section class="stats-grid" id="stats-grid"></section>
+
+      <section class="main-grid">
+        <section class="card">
+          <div class="section-head">
+            <div>
+              <p class="eyebrow">Project state</p>
+              <h2>Tracked Components</h2>
+            </div>
+            <span class="badge">Live graph</span>
+          </div>
+          <div id="projects" class="stack"></div>
+        </section>
+
+        <section class="card">
+          <div class="section-head">
+            <div>
+              <p class="eyebrow">Safety</p>
+              <h2>Proxy Alerts</h2>
+            </div>
+            <span class="badge badge-warn">Injection guard</span>
+          </div>
+          <div id="warnings" class="stack"></div>
+        </section>
+      </section>
+
+      <section class="main-grid">
+        <section class="card graph-card">
+          <div class="section-head">
+            <div>
+              <p class="eyebrow">Entity graph</p>
+              <h2>Hot paths</h2>
+            </div>
+            <span class="badge badge-calm">RAM traversal</span>
+          </div>
+          <svg id="graph" viewBox="0 0 860 420" role="img" aria-label="Entity graph"></svg>
+        </section>
+
+        <section class="card">
+          <div class="section-head">
+            <div>
+              <p class="eyebrow">Complexity debt</p>
+              <h2>Miss pressure</h2>
+            </div>
+            <span class="badge">Self-correcting</span>
+          </div>
+          <div id="hot-entities" class="stack"></div>
+        </section>
+      </section>
+
+      <section class="card">
+        <div class="section-head">
+          <div>
+            <p class="eyebrow">Telemetry</p>
+            <h2>Recent retrievals</h2>
+          </div>
+          <span class="badge">Latency, tokens, expansion</span>
+        </div>
+        <div class="table-wrap">
+          <table>
+            <thead>
+              <tr>
+                <th>Query</th>
+                <th>Latency</th>
+                <th>Items</th>
+                <th>Tokens</th>
+                <th>Expansion</th>
+              </tr>
+            </thead>
+            <tbody id="retrieval-table"></tbody>
+          </table>
+        </div>
+      </section>
+
+      <section class="main-grid">
+        <section class="card">
+          <div class="section-head">
+            <div>
+              <p class="eyebrow">Adaptive recall</p>
+              <h2>Hint policy</h2>
+            </div>
+            <span class="badge">Weights and TTL</span>
+          </div>
+          <div id="hint-policy" class="stack"></div>
+        </section>
+
+        <section class="card">
+          <div class="section-head">
+            <div>
+              <p class="eyebrow">Learning log</p>
+              <h2>Hint events</h2>
+            </div>
+            <span class="badge badge-calm">Rewarded or decayed</span>
+          </div>
+          <div id="hint-events" class="stack"></div>
+        </section>
+      </section>
+
+      <section class="card">
+        <div class="section-head">
+          <div>
+            <p class="eyebrow">Sessions</p>
+            <h2>Recent conversations</h2>
+          </div>
+          <span class="badge badge-calm">Captured locally</span>
+        </div>
+        <div id="conversations" class="conversation-grid"></div>
+      </section>
+    </div>
+
+    <script type="module" src="/dashboard.js"></script>
+  </body>
+</html>

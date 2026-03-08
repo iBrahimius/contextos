@@ -1,0 +1,19 @@
+{
+  "name": "contextos",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "Local-first memory operating system for AI agents.",
+  "scripts": {
+    "start": "node src/app.js",
+    "modeld": "node src/modeld/server.js",
+    "demo": "node scripts/demo.js",
+    "test": "node --test"
+  },
+  "engines": {
+    "node": ">=25.0.0"
+  },
+  "dependencies": {
+    "node-llama-cpp": "^3.17.1"
+  }
+}
