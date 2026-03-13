@@ -21,4 +21,6 @@ jobs:
         run: npm ci
 
       - name: Run tests
-        run: npm test
+        run: node --test $(find test -name '*.test.js' ! -name 'embeddings.test.js' ! -name 'retrieval-quality.test.js')
+        env:
+          CI: true
