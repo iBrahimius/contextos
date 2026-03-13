@@ -8,6 +8,7 @@
     "start": "node src/app.js",
     "modeld": "node src/modeld/server.js",
     "demo": "node scripts/demo.js",
+    "lint": "eslint src/ test/",
     "test": "node --test"
   },
   "engines": {
@@ -15,5 +16,9 @@
   },
   "dependencies": {
     "node-llama-cpp": "^3.17.1"
+  },
+  "devDependencies": {
+    "@eslint/js": "^10.0.1",
+    "eslint": "^10.0.3"
   }
 }

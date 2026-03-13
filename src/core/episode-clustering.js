@@ -80,7 +80,7 @@ function extractEntitiesFromObservation(observation) {
           }
         }
       }
-    } catch (e) {
+    } catch {
       // Ignore JSON parse errors
     }
   }

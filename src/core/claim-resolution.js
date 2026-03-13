@@ -145,22 +145,6 @@ function compareClaimStrength(left, right) {
 }
 
 /**
- * Check if metadata contains an explicit resolution key
- */
-function hasExplicitResolutionKey(metadata = null) {
-  const explicit = normalizeClaimText(
-    metadata?.resolutionKey
-    ?? metadata?.resolution_key
-    ?? metadata?.stateKey
-    ?? metadata?.state_key
-    ?? metadata?.registryKey
-    ?? metadata?.registry_key
-    ?? metadata?.slot,
-  );
-  return Boolean(explicit);
-}
-
-/**
  * Build claim resolution key with 4-level fallback cascade:
  * 1. Explicit metadata (never orphans claims)
  * 2. Relationship-specific (subject + predicate + object)
@@ -398,7 +382,7 @@ export function ensureClaimForObservation(db, observation) {
     return insertClaimWithState("active");
   }
 
-  let resolution = { action: "activate", supersedes: null };
+  let resolution;
 
   try {
     const existingClaims = db.listClaimsByResolutionKey(claim.resolution_key);

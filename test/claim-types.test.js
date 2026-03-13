@@ -5,8 +5,6 @@ import {
   CLAIM_TYPE_VALUES,
   LIFECYCLE_STATES,
   SOURCE_TYPES,
-  STATE_MACHINES,
-  INITIAL_STATES,
   isValidClaimType,
   isValidLifecycleState,
   isValidSourceType,
