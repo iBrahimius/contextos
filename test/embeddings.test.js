@@ -10,6 +10,7 @@ import { ContextOS } from "../src/core/context-os.js";
 import { EMBEDDING_DIMENSIONS, EMBEDDING_MODEL_PATH, embedText } from "../src/core/embeddings.js";
 import { estimateTokens } from "../src/core/utils.js";
 import { handleRequest } from "../src/http/router.js";
+import { skipUnlessEmbeddings } from "./skip-guards.js";
 
 async function makeRoot() {
   const root = await fs.mkdtemp(path.join(os.tmpdir(), "contextos-embeddings-"));
@@ -46,7 +47,7 @@ async function waitFor(check, { timeoutMs = 30000, intervalMs = 25 } = {}) {
   throw new Error(`Timed out after ${timeoutMs}ms`);
 }
 
-test("embedText loads the real embedding model and returns a 768-dim Float32Array", async () => {
+test("embedText loads the real embedding model and returns a 768-dim Float32Array", { skip: skipUnlessEmbeddings }, async () => {
   await fs.access(EMBEDDING_MODEL_PATH);
 
   const vector = await embedText("Move DNS to Cloudflare for the edge network.");
@@ -55,7 +56,7 @@ test("embedText loads the real embedding model and returns a 768-dim Float32Arra
   assert.equal(vector.length, EMBEDDING_DIMENSIONS);
 });
 
-test("ingestMessage stays non-blocking while the embedding is stored asynchronously", async () => {
+test("ingestMessage stays non-blocking while the embedding is stored asynchronously", { skip: skipUnlessEmbeddings }, async () => {
   const rootDir = await makeRoot();
   const contextOS = new ContextOS({
     rootDir,
@@ -87,7 +88,7 @@ test("ingestMessage stays non-blocking while the embedding is stored asynchronou
   }
 });
 
-test("backfillEmbeddings updates /api/status coverage for existing messages", async () => {
+test("backfillEmbeddings updates /api/status coverage for existing messages", { skip: skipUnlessEmbeddings }, async () => {
   const rootDir = await makeRoot();
   const contextOS = new ContextOS({
     rootDir,
@@ -128,7 +129,7 @@ test("backfillEmbeddings updates /api/status coverage for existing messages", as
   }
 });
 
-test("hybrid retrieval ranks the semantic decision above a keyword-only partner mention", async () => {
+test("hybrid retrieval ranks the semantic decision above a keyword-only partner mention", { skip: skipUnlessEmbeddings }, async () => {
   const rootDir = await makeRoot();
   const contextOS = new ContextOS({
     rootDir,

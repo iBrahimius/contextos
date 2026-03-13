@@ -6,6 +6,7 @@ import path from "node:path";
 
 import { ContextOS } from "../src/core/context-os.js";
 import { persistHeuristicPatchForMessage } from "./test-helpers.js";
+import { skipUnlessEmbeddings } from "./skip-guards.js";
 
 async function makeRoot() {
   const root = await fs.mkdtemp(path.join(os.tmpdir(), "contextos-"));
@@ -14,7 +15,7 @@ async function makeRoot() {
   return root;
 }
 
-test("graph-aware retrieval expands related components", async () => {
+test("graph-aware retrieval expands related components", { skip: skipUnlessEmbeddings }, async () => {
   const rootDir = await makeRoot();
   const contextOS = new ContextOS({ rootDir });
   const conversation = contextOS.database.createConversation("Retrieval Test");

@@ -8,8 +8,11 @@ import {
   isValidRouteLabel,
   scoreQuery,
 } from "./retrieval-quality.helpers.js";
+import { checkContextOSRunning } from "./skip-guards.js";
 
 const CONTEXTOS_URL = process.env.CONTEXTOS_URL ?? "http://localhost:4183";
+const contextOSRunning = await checkContextOSRunning(CONTEXTOS_URL);
+const skipUnlessLive = contextOSRunning ? false : `ContextOS not running at ${CONTEXTOS_URL}`;
 const GOLDEN_SET_PATH = new URL("./golden-retrieval-set.json", import.meta.url).pathname;
 const HISTORY_PATH = new URL("./retrieval-quality-history.json", import.meta.url).pathname;
 
@@ -89,7 +92,7 @@ test("artifact-boundary audit scenarios are enforced at scoring layer", () => {
   }
 });
 
-test("Retrieval Quality — Golden Set", async () => {
+test("Retrieval Quality — Golden Set", { skip: skipUnlessLive }, async () => {
   const results = [];
   const startTime = Date.now();
 

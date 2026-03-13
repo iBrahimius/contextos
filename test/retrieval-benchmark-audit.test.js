@@ -7,6 +7,7 @@ import path from "node:path";
 
 import { ContextOS } from "../src/core/context-os.js";
 import { handleRequest } from "../src/http/router.js";
+import { skipUnlessEmbeddings } from "./skip-guards.js";
 
 const FIXTURE_PATH = new URL("./fixtures/retrieval-audit-golden.json", import.meta.url);
 const scenarios = JSON.parse(await fs.readFile(FIXTURE_PATH, "utf8"));
@@ -269,7 +270,7 @@ async function seedAuditDataset(harness) {
   });
 }
 
-test("retrieval benchmark audit fixtures validate claims-aware and lifecycle-sensitive packet assembly", async () => {
+test("retrieval benchmark audit fixtures validate claims-aware and lifecycle-sensitive packet assembly", { skip: skipUnlessEmbeddings }, async () => {
   const harness = await createHarness();
 
   try {
