@@ -13,6 +13,8 @@ const CONTENT_TYPES = {
   ".svg": "image/svg+xml",
 };
 const CORS_ALLOW_HEADERS = "content-type, authorization";
+const MAX_BODY_BYTES = 1_048_576; // 1 MB
+const MAX_PAGE_SIZE = 100;
 
 const cachedRegistry = createCachedRegistry(5000);
 
@@ -81,12 +83,27 @@ function sendFile(response, statusCode, body, contentType) {
 
 async function parseJsonBody(request) {
   const chunks = [];
+  let totalBytes = 0;
   for await (const chunk of request) {
+    totalBytes += chunk.length;
+    if (totalBytes > MAX_BODY_BYTES) {
+      const error = new Error("Request body too large");
+      error.statusCode = 413;
+      throw error;
+    }
     chunks.push(chunk);
   }
 
   const body = Buffer.concat(chunks).toString("utf8");
-  return body ? JSON.parse(body) : {};
+  if (!body) return {};
+
+  try {
+    return JSON.parse(body);
+  } catch {
+    const error = new Error("Invalid JSON in request body");
+    error.statusCode = 400;
+    throw error;
+  }
 }
 
 function parsePaginationParams(searchParams) {
@@ -104,7 +121,7 @@ function parsePaginationParams(searchParams) {
   if (hasLimit) {
     const limit = Number(searchParams.get("limit"));
     if (Number.isFinite(limit)) {
-      pagination.limit = limit;
+      pagination.limit = Math.min(Math.max(1, Math.trunc(limit)), MAX_PAGE_SIZE);
     }
   }
 
@@ -749,12 +766,16 @@ export async function handleRequest(contextOS, rootDir, request, response) {
       return;
     }
 
+    if (pathname.startsWith("/api/")) {
+      sendJson(response, 404, withGraphVersion({ error: "Not found" }, resolveGraphVersion(contextOS)));
+      return;
+    }
+
     await serveUiAsset(rootDir, pathname, response, resolveGraphVersion(contextOS));
   } catch (error) {
     const statusCode = Number(error?.statusCode);
     sendJson(response, Number.isInteger(statusCode) ? statusCode : 500, withGraphVersion({
-      error: error.message,
-      stack: error.stack,
+      error: error.message ?? "Internal server error",
     }, resolveGraphVersion(contextOS)));
   }
 }
