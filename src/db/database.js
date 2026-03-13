@@ -387,6 +387,15 @@ const SCHEMA_MIGRATIONS = [
 
 const SCHEMA_INDEXES = [
   `CREATE UNIQUE INDEX IF NOT EXISTS idx_messages_ingest_id ON messages(ingest_id) WHERE ingest_id IS NOT NULL`,
+  // Hot-path query performance (issue #9)
+  `CREATE INDEX IF NOT EXISTS idx_messages_captured_at ON messages(captured_at DESC)`,
+  `CREATE INDEX IF NOT EXISTS idx_observations_created_at ON observations(created_at DESC)`,
+  `CREATE INDEX IF NOT EXISTS idx_tasks_entity_created ON tasks(entity_id, created_at DESC) WHERE entity_id IS NOT NULL`,
+  `CREATE INDEX IF NOT EXISTS idx_decisions_entity_created ON decisions(entity_id, created_at DESC) WHERE entity_id IS NOT NULL`,
+  `CREATE INDEX IF NOT EXISTS idx_constraints_entity_created ON constraints(entity_id, created_at DESC) WHERE entity_id IS NOT NULL`,
+  `CREATE INDEX IF NOT EXISTS idx_facts_entity_created ON facts(entity_id, created_at DESC) WHERE entity_id IS NOT NULL`,
+  `CREATE INDEX IF NOT EXISTS idx_chunk_entities_entity ON chunk_entities(entity_id)`,
+  `CREATE INDEX IF NOT EXISTS idx_graph_proposals_created ON graph_proposals(created_at DESC)`,
 ];
 
 export class ContextDatabase {
