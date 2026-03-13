@@ -833,8 +833,8 @@ export class ContextOS {
     const resolvedBatchSize = Math.max(1, Math.trunc(batchSize) || EMBEDDING_BACKFILL_BATCH_SIZE);
     const resolvedRate = Math.max(1, Math.trunc(rateLimitPerSecond) || EMBEDDING_BACKFILL_RATE_PER_SECOND);
     const intervalMs = Math.ceil((resolvedBatchSize / resolvedRate) * 1000);
-    let processedMessages = 0;
-    let processedObservations = 0;
+    let processedMessages;
+    let processedObservations;
 
     const backfillBatch = async ({
       kind,
@@ -2598,7 +2598,6 @@ export class ContextOS {
     const blockedInbound = guardEvents.find((event) => event.role !== "assistant" && event.verdict === "block");
     const latestUser = [...messages].reverse().find((message) => message.role === "user");
     const latestUserCapture = [...captured].reverse().find((record) => record.message.role === "user");
-    const latestCapture = captured.at(-1) ?? null;
     const retrieval = latestUser && !blockedInbound
       ? await this.retrieve({
           conversationId: conversation.id,

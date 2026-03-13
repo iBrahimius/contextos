@@ -372,7 +372,7 @@ test("clusterObservations: handles date range filtering", async () => {
 test("clusterObservations: empty observation set returns zeros", async () => {
   const rootDir = await makeRoot();
   const contextOS = new ContextOS({ rootDir, autoBackfillEmbeddings: false });
-  const conversation = contextOS.database.createConversation(
+  contextOS.database.createConversation(
     "Empty Clustering Test"
   );
 

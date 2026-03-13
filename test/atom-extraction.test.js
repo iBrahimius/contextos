@@ -13,7 +13,7 @@ class MockLLMClient {
     this.callCount = 0;
   }
 
-  async completeJSON(params) {
+  async completeJSON(_params) {
     this.callCount++;
     return this.response;
   }
@@ -154,7 +154,7 @@ test("extractAtoms - preserves atom types and confidence", async () => {
 test("persistAtoms - writes atoms to database", async () => {
   let runCount = 0;
   const testDb = {
-    prepare: (sql) => ({
+    prepare: (_sql) => ({
       run: (...args) => {
         runCount++;
         assert.equal(args[0], 42);
