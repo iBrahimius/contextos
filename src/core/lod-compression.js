@@ -127,14 +127,16 @@ export async function generateLevels(atoms, observations, llmClient) {
  * Persist LOD levels to the database.
  *
  * Each level is stored with its character count and source observation IDs.
+ * L0 and L1 levels are also embedded (via embedText) and indexed for vector + FTS search.
  *
  * @param {object} db — SQLite database instance
  * @param {number} clusterId — Cluster ID to associate levels with
  * @param {object} levels — { l0, l1, l2 } level texts
  * @param {Array<number>} [sourceObservationIds] — Optional observation IDs (stored as JSON)
+ * @param {Function} [embedText] — Optional embedding function; if provided, embeds L0 + L1
  * @returns {Promise<void>}
  */
-export async function persistLevels(db, clusterId, levels, sourceObservationIds = []) {
+export async function persistLevels(db, clusterId, levels, sourceObservationIds = [], embedText = null) {
   const stmt = db.prepare(`
     INSERT INTO cluster_levels (cluster_id, level, text, source_observation_ids, char_count, generated_at)
     VALUES (?, ?, ?, ?, ?, datetime('now'))
@@ -158,5 +160,30 @@ export async function persistLevels(db, clusterId, levels, sourceObservationIds 
       JSON.stringify(sourceObservationIds),
       levelText.length
     );
+
+    // Embed L0 and L1 for vector search; L2 is only loaded on-demand
+    if ((levelNum === 0 || levelNum === 1) && embedText) {
+      try {
+        const embedding = await embedText(levelText);
+        if (embedding) {
+          db.upsertClusterLevelEmbedding({
+            clusterId,
+            level: levelNum,
+            embedding,
+          });
+        }
+      } catch (err) {
+        console.warn(`[lod-compression] Failed to embed cluster L${levelNum}:`, err.message);
+      }
+    }
+
+    // Index L0 and L1 in FTS for full-text search
+    if (levelNum === 0 || levelNum === 1) {
+      try {
+        db.insertClusterLevelFts(clusterId, levelNum, levelText);
+      } catch (err) {
+        console.warn(`[lod-compression] Failed to index cluster L${levelNum} in FTS:`, err.message);
+      }
+    }
   }
 }

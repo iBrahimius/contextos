@@ -14,6 +14,21 @@ export const SOURCE_TYPE_RANK = {
 };
 
 export const CLAIM_SOURCE_TYPES = new Set(["explicit", "implicit", "inference", "derived", "unknown"]);
+export const CLAIM_LIFECYCLE_RANK = {
+  active: 5,
+  candidate: 4,
+  disputed: 3,
+  superseded: 2,
+  archived: 1,
+};
+
+export const CLAIM_LIFECYCLE_TRANSITIONS = {
+  candidate: ["active", "disputed", "archived"],
+  active: ["superseded", "disputed", "archived"],
+  disputed: ["active", "superseded", "archived"],
+  superseded: ["archived"],
+  archived: [],
+};
 
 function pickField(record, ...keys) {
   for (const key of keys) {
@@ -34,6 +49,30 @@ function normalizeString(value) {
   return normalized ? normalized : null;
 }
 
+export function getValidLifecycleTransitions(currentState) {
+  const normalizedState = normalizeString(currentState);
+  if (!normalizedState || !isValidLifecycleState(normalizedState)) {
+    return [];
+  }
+
+  return [...(CLAIM_LIFECYCLE_TRANSITIONS[normalizedState] ?? [])];
+}
+
+export function validateLifecycleTransition(fromState, toState) {
+  const normalizedFrom = normalizeString(fromState);
+  const normalizedTo = normalizeString(toState);
+
+  if (!normalizedFrom || !normalizedTo) {
+    return false;
+  }
+
+  if (normalizedFrom === normalizedTo) {
+    return true;
+  }
+
+  return getValidLifecycleTransitions(normalizedFrom).includes(normalizedTo);
+}
+
 /**
  * Normalize claim text: lowercase + collapse whitespace
  * Used for resolution and facet key construction
@@ -43,6 +82,213 @@ function normalizeClaimText(value) {
     .toLowerCase()
     .replace(/\s+/g, " ")
     .trim();
+}
+
+function clampConfidence(value) {
+  if (!Number.isFinite(value)) {
+    return 0;
+  }
+
+  return Math.max(0, Math.min(1, value));
+}
+
+function roundConfidence(value) {
+  return Number(clampConfidence(value).toFixed(4));
+}
+
+export function claimHasSupersededSuccessor(claim) {
+  return Boolean(claim?.superseded_by_claim_id ?? claim?.supersededByClaimId);
+}
+
+export function isClaimCurrent(claim) {
+  const lifecycleState = claim?.lifecycle_state ?? claim?.lifecycleState ?? null;
+  if (["superseded", "archived"].includes(lifecycleState)) {
+    return false;
+  }
+
+  return !claimHasSupersededSuccessor(claim);
+}
+
+function isScalarClaimValue(value) {
+  const normalized = normalizeClaimText(value);
+  if (!normalized) {
+    return false;
+  }
+
+  if (normalized.length > 80 || /[.!?;:]/.test(normalized)) {
+    return false;
+  }
+
+  if (/^[€$£]?\d+(?:[.,]\d+)?$/.test(normalized)) {
+    return true;
+  }
+
+  const tokens = normalized.split(/\s+/).filter(Boolean);
+  return tokens.length <= 2;
+}
+
+export function getClaimValueSignature(claim) {
+  const objectEntityId = normalizeString(claim?.object_entity_id ?? claim?.objectEntityId);
+  if (objectEntityId) {
+    return `object:${objectEntityId}`;
+  }
+
+  const valueText = normalizeString(claim?.value_text ?? claim?.valueText);
+  if (isScalarClaimValue(valueText)) {
+    return `value:${normalizeClaimText(valueText).slice(0, 160)}`;
+  }
+
+  return null;
+}
+
+export function getClaimSupportKey(claim) {
+  const observationId = normalizeString(claim?.observation_id ?? claim?.observationId);
+  if (observationId) {
+    return `observation:${observationId}`;
+  }
+
+  const messageId = normalizeString(claim?.message_id ?? claim?.messageId);
+  if (messageId) {
+    return `message:${messageId}`;
+  }
+
+  const actorId = normalizeString(claim?.actor_id ?? claim?.actorId) ?? "unknown";
+  const createdAt = normalizeString(claim?.created_at ?? claim?.createdAt ?? claim?.updated_at ?? claim?.updatedAt) ?? "unknown";
+  return `claim:${actorId}:${createdAt}`;
+}
+
+export function claimsMateriallyConflict(left, right) {
+  if (claimResolutionGroupKey(left) !== claimResolutionGroupKey(right)) {
+    return false;
+  }
+
+  const leftSignature = getClaimValueSignature(left);
+  const rightSignature = getClaimValueSignature(right);
+  if (!leftSignature || !rightSignature) {
+    return false;
+  }
+
+  return leftSignature !== rightSignature;
+}
+
+function aggregateConfidenceFromClaims(claims) {
+  const uniqueSupport = new Map();
+  for (const claim of claims ?? []) {
+    const supportKey = getClaimSupportKey(claim);
+    const confidence = getConfidence(claim?.confidence);
+    const existing = uniqueSupport.get(supportKey) ?? 0;
+    if (confidence > existing) {
+      uniqueSupport.set(supportKey, confidence);
+    }
+  }
+
+  let complement = 1;
+  for (const confidence of uniqueSupport.values()) {
+    complement *= (1 - clampConfidence(confidence));
+  }
+
+  return {
+    support_keys: [...uniqueSupport.keys()],
+    aggregated_confidence: roundConfidence(1 - complement),
+  };
+}
+
+export function analyzeClaimsTruthSet(claims) {
+  const groups = new Map();
+  for (const claim of claims ?? []) {
+    const resolutionKey = claimResolutionGroupKey(claim) ?? `claim:${claim?.id ?? "unknown"}`;
+    const group = groups.get(resolutionKey) ?? [];
+    group.push(claim);
+    groups.set(resolutionKey, group);
+  }
+
+  const byClaimId = new Map();
+  const conflicts = [];
+  const variants = [];
+
+  for (const [resolutionKey, resolutionClaims] of groups.entries()) {
+    const variantMap = new Map();
+    for (const claim of resolutionClaims) {
+      const valueSignature = getClaimValueSignature(claim);
+      const variantKey = valueSignature ?? `claim:${claim.id}`;
+      const variant = variantMap.get(variantKey) ?? {
+        resolution_key: resolutionKey,
+        value_signature: valueSignature,
+        claims: [],
+        current_claims: [],
+      };
+      variant.claims.push(claim);
+      if (isClaimCurrent(claim)) {
+        variant.current_claims.push(claim);
+      }
+      variantMap.set(variantKey, variant);
+    }
+
+    const currentComparableVariants = [...variantMap.values()].filter((variant) => variant.current_claims.length > 0 && variant.value_signature);
+    const hasConflict = currentComparableVariants.length > 1;
+    const conflictSetId = hasConflict ? `conflict:${resolutionKey}` : null;
+    const conflictClaimIds = hasConflict
+      ? currentComparableVariants.flatMap((variant) => variant.current_claims.map((claim) => claim.id))
+      : [];
+
+    if (hasConflict) {
+      conflicts.push({
+        conflict_set_id: conflictSetId,
+        resolution_key: resolutionKey,
+        claim_ids: [...conflictClaimIds],
+        claim_count: conflictClaimIds.length,
+        value_signatures: currentComparableVariants.map((variant) => variant.value_signature),
+      });
+    }
+
+    for (const variant of variantMap.values()) {
+      const supportClaims = variant.current_claims.length
+        ? variant.current_claims
+        : variant.claims.filter((claim) => (claim?.lifecycle_state ?? null) !== "archived");
+      const aggregated = aggregateConfidenceFromClaims(supportClaims);
+      const representativePool = variant.current_claims.length ? variant.current_claims : variant.claims;
+      const representative = representativePool.reduce((best, claim) => (!best || compareClaimLifecyclePriority(claim, best) > 0 ? claim : best), null);
+      const variantConflictIds = hasConflict
+        ? conflictClaimIds.filter((claimId) => !variant.current_claims.some((claim) => claim.id === claimId))
+        : [];
+      const conflictPenalty = hasConflict ? 0.65 : 1;
+      const effectiveConfidence = roundConfidence(aggregated.aggregated_confidence * conflictPenalty);
+      const variantSummary = {
+        resolution_key: resolutionKey,
+        representative_claim_id: representative?.id ?? null,
+        value_signature: variant.value_signature,
+        claim_ids: variant.claims.map((claim) => claim.id),
+        current_claim_ids: variant.current_claims.map((claim) => claim.id),
+        support_claim_ids: supportClaims.map((claim) => claim.id),
+        support_keys: aggregated.support_keys,
+        support_count: aggregated.support_keys.length,
+        aggregated_confidence: aggregated.aggregated_confidence,
+        effective_confidence: effectiveConfidence,
+        extraction_confidence: roundConfidence(getConfidence(representative?.confidence)),
+        has_conflict: hasConflict,
+        conflict_set_id: conflictSetId,
+        conflicting_claim_ids: variantConflictIds,
+      };
+      variants.push(variantSummary);
+
+      for (const claim of variant.claims) {
+        const isCurrent = isClaimCurrent(claim);
+        byClaimId.set(claim.id, {
+          ...variantSummary,
+          has_conflict: hasConflict && isCurrent,
+          lifecycle_state: claim?.lifecycle_state ?? null,
+          is_current: isCurrent,
+          is_superseded: !isCurrent,
+        });
+      }
+    }
+  }
+
+  return {
+    byClaimId,
+    conflicts,
+    variants,
+  };
 }
 
 /**
@@ -144,6 +390,52 @@ function compareClaimStrength(left, right) {
   return getRecencyTimestamp(left) - getRecencyTimestamp(right);
 }
 
+function effectiveClaimLifecycleState(claim) {
+  if ((claim?.superseded_by_claim_id ?? claim?.supersededByClaimId) && claim?.lifecycle_state === "active") {
+    return "superseded";
+  }
+
+  return claim?.lifecycle_state ?? null;
+}
+
+function compareClaimLifecyclePriority(left, right) {
+  const lifecycleDelta = (CLAIM_LIFECYCLE_RANK[effectiveClaimLifecycleState(left)] ?? 0)
+    - (CLAIM_LIFECYCLE_RANK[effectiveClaimLifecycleState(right)] ?? 0);
+  if (lifecycleDelta !== 0) {
+    return lifecycleDelta;
+  }
+
+  const strengthDelta = compareClaimStrength(left, right);
+  if (strengthDelta !== 0) {
+    return strengthDelta;
+  }
+
+  return getRecencyTimestamp(left) - getRecencyTimestamp(right);
+}
+
+function claimResolutionGroupKey(claim) {
+  return normalizeString(claim?.resolution_key ?? claim?.resolutionKey)
+    ?? normalizeString(claim?.facet_key ?? claim?.facetKey)
+    ?? normalizeString(claim?.id)
+    ?? null;
+}
+
+/**
+ * Check if metadata contains an explicit resolution key
+ */
+function _hasExplicitResolutionKey(metadata = null) {
+  const explicit = normalizeClaimText(
+    metadata?.resolutionKey
+    ?? metadata?.resolution_key
+    ?? metadata?.stateKey
+    ?? metadata?.state_key
+    ?? metadata?.registryKey
+    ?? metadata?.registry_key
+    ?? metadata?.slot,
+  );
+  return Boolean(explicit);
+}
+
 /**
  * Build claim resolution key with 4-level fallback cascade:
  * 1. Explicit metadata (never orphans claims)
@@ -240,7 +532,7 @@ export function buildClaimFacetKey(claimType, subjectEntityId, predicate, object
 
 /**
  * Deduplicate claims by facet key at retrieval time
- * Picks best claim per facet based on lifecycle state, confidence, and timestamp
+ * Picks best claim per facet based on lifecycle state, strength, and recency
  */
 export function dedupeClaimsByFacet(claims) {
   const deduped = new Map();
@@ -249,29 +541,34 @@ export function dedupeClaimsByFacet(claims) {
     const key = claim.facet_key ?? claim.facetKey ?? claim.id;
     const existing = deduped.get(key);
 
-    if (!existing) {
+    if (!existing || compareClaimLifecyclePriority(claim, existing) > 0) {
       deduped.set(key, claim);
-      continue;
     }
-
-    const existingState = String(existing.lifecycle_state ?? existing.lifecycleState ?? "active");
-    const nextState = String(claim.lifecycle_state ?? claim.lifecycleState ?? "active");
-    const existingConfidence = Number(existing.confidence ?? 0);
-    const nextConfidence = Number(claim.confidence ?? 0);
-    const existingTimestamp = String(existing.valid_from ?? existing.created_at ?? existing.createdAt ?? "");
-    const nextTimestamp = String(claim.valid_from ?? claim.created_at ?? claim.createdAt ?? "");
-
-    // Prefer active claims; if both same state, prefer higher confidence or newer
-    const preferred = nextState === "active" && existingState !== "active"
-      ? claim
-      : nextState === existingState && (nextConfidence > existingConfidence || nextTimestamp > existingTimestamp)
-        ? claim
-        : existing;
-
-    deduped.set(key, preferred);
   }
 
   return Array.from(deduped.values());
+}
+
+/**
+ * Collapse contradictory lifecycle/history rows into one preferred current-truth
+ * path per resolution key. Historical rows stay queryable via the database.
+ */
+export function selectPreferredClaimsByResolution(claims) {
+  const preferred = new Map();
+
+  for (const claim of claims ?? []) {
+    const key = claimResolutionGroupKey(claim);
+    if (!key) {
+      continue;
+    }
+
+    const existing = preferred.get(key);
+    if (!existing || compareClaimLifecyclePriority(claim, existing) > 0) {
+      preferred.set(key, claim);
+    }
+  }
+
+  return Array.from(preferred.values());
 }
 
 /**
@@ -344,7 +641,30 @@ export function buildClaimFromObservation(observation) {
 }
 
 export function resolveSupersession(newClaim, existingClaims) {
-  const activeClaims = (existingClaims ?? []).filter((claim) => claim?.lifecycle_state === "active");
+  const currentClaims = (existingClaims ?? []).filter((claim) => isClaimCurrent(claim));
+  const activeClaims = currentClaims.filter((claim) => claim?.lifecycle_state === "active");
+  if (currentClaims.length === 0) {
+    return { action: "activate", supersedes: null };
+  }
+
+  const newSignature = getClaimValueSignature(newClaim);
+  if (newSignature) {
+    const conflictingClaims = currentClaims.filter((claim) => claimsMateriallyConflict(newClaim, claim));
+    if (conflictingClaims.length > 0) {
+      const conflictsWithIds = conflictingClaims.map((claim) => claim.id);
+      return {
+        action: "dispute",
+        conflictsWithIds,
+        conflictsWith: conflictsWithIds[0] ?? null,
+      };
+    }
+
+    const supportingClaims = currentClaims.filter((claim) => getClaimValueSignature(claim) === newSignature);
+    if (supportingClaims.length > 0) {
+      return { action: "support", supports: supportingClaims.map((claim) => claim.id) };
+    }
+  }
+
   if (activeClaims.length === 0) {
     return { action: "activate", supersedes: null };
   }
@@ -352,11 +672,8 @@ export function resolveSupersession(newClaim, existingClaims) {
   const matchingFacetClaims = activeClaims.filter(
     (claim) => (claim?.facet_key ?? null) === (newClaim?.facet_key ?? null),
   );
-  if (matchingFacetClaims.length === 0) {
-    return { action: "activate", supersedes: null };
-  }
-
-  const strongestExisting = matchingFacetClaims.reduce((best, claim) => {
+  const comparisonPool = matchingFacetClaims.length ? matchingFacetClaims : activeClaims;
+  const strongestExisting = comparisonPool.reduce((best, claim) => {
     if (!best) {
       return claim;
     }
@@ -364,11 +681,19 @@ export function resolveSupersession(newClaim, existingClaims) {
     return compareClaimStrength(claim, best) > 0 ? claim : best;
   }, null);
 
+  if (!strongestExisting) {
+    return { action: "activate", supersedes: null };
+  }
+
   if (compareClaimStrength(newClaim, strongestExisting) > 0) {
     return { action: "supersede", supersedes: strongestExisting.id };
   }
 
-  return { action: "dispute", conflictsWith: strongestExisting.id };
+  return {
+    action: "dispute",
+    conflictsWithIds: [strongestExisting.id],
+    conflictsWith: strongestExisting.id,
+  };
 }
 
 export function ensureClaimForObservation(db, observation) {
@@ -382,7 +707,7 @@ export function ensureClaimForObservation(db, observation) {
     return insertClaimWithState("active");
   }
 
-  let resolution;
+  let resolution = { action: "activate", supersedes: null };
 
   try {
     const existingClaims = db.listClaimsByResolutionKey(claim.resolution_key);
@@ -400,9 +725,11 @@ export function ensureClaimForObservation(db, observation) {
 
     try {
       insertedClaim = insertClaimWithState("active");
+      const supersededAt = insertedClaim.valid_from ?? insertedClaim.created_at ?? new Date().toISOString();
       db.updateClaim(resolution.supersedes, {
         lifecycle_state: "superseded",
         superseded_by_claim_id: insertedClaim.id,
+        valid_to: supersededAt,
       });
 
       return db.updateClaim(insertedClaim.id, {
@@ -417,18 +744,24 @@ export function ensureClaimForObservation(db, observation) {
     }
   }
 
-  if (resolution.action === "dispute" && resolution.conflictsWith) {
+  if (resolution.action === "support") {
+    return insertClaimWithState("active");
+  }
+
+  if (resolution.action === "dispute" && resolution.conflictsWithIds?.length) {
     let insertedClaim = null;
 
     try {
       insertedClaim = insertClaimWithState("disputed");
-      db.updateClaim(resolution.conflictsWith, {
-        lifecycle_state: "disputed",
-      });
+      for (const conflictId of resolution.conflictsWithIds) {
+        db.updateClaim(conflictId, {
+          lifecycle_state: "disputed",
+        });
+      }
       return insertedClaim;
     } catch (error) {
       console.warn(
-        `[claim-resolution] Failed to dispute claim ${resolution.conflictsWith}; inserting as active.`,
+        `[claim-resolution] Failed to dispute claims ${resolution.conflictsWithIds.join(", ")}; inserting as active.`,
         error,
       );
       return insertedClaim ?? insertClaimWithState("active");

@@ -13,9 +13,11 @@ import { CLAIM_TYPE_VALUES, LIFECYCLE_STATES } from "./claim-types.js";
 import { normalizeLabel, validateKnowledgePatch } from "./knowledge-patch.js";
 import { PreconsciousBuffer } from "./preconscious.js";
 import { RetrievalEngine } from "./retrieval.js";
+import { VectorIndex } from "./vector-index.js";
 import { clamp, estimateTokens, parseJson } from "./utils.js";
-import { classifyWriteClass } from "./write-discipline.js";
-import { ensureClaimForObservation } from "../core/claim-resolution.js";
+import { classifyWriteClass, getQueuePressureDisposition, getWriteClassDisposition } from "./write-discipline.js";
+import { createAssemblyCache } from "./assembly-cache.js";
+import { analyzeClaimsTruthSet, ensureClaimForObservation, selectPreferredClaimsByResolution } from "../core/claim-resolution.js";
 import { ContextDatabase } from "../db/database.js";
 import { TelemetryDatabase } from "../db/telemetry-database.js";
 
@@ -103,7 +105,33 @@ function toEventRecord(message, extra = {}) {
   };
 }
 
-function toProposalResponse(row) {
+function summarizeProposalPayload(payload = null) {
+  if (!payload || typeof payload !== "object") {
+    return [];
+  }
+
+  return Object.entries(payload)
+    .filter(([, value]) => value !== null && value !== undefined && value !== "")
+    .slice(0, 4)
+    .map(([field, value]) => ({
+      field,
+      value: Array.isArray(value) ? value.join(", ") : String(value),
+    }));
+}
+
+function getProposalQueueMetadata(row) {
+  const writeClass = row.write_class ?? classifyWriteClass(row.proposal_type);
+  return getQueuePressureDisposition({
+    writeClass,
+    status: row.status,
+    confidence: row.confidence,
+  });
+}
+
+function toProposalResponse(row, { sourceEventId = null } = {}) {
+  const payload = parseJson(row.payload_json, null);
+  const queueMetadata = getProposalQueueMetadata(row);
+
   return {
     mutation_id: row.id,
     proposal_id: row.id,
@@ -117,6 +145,11 @@ function toProposalResponse(row) {
     object_label: row.object_label,
     created_at: row.created_at,
     reviewed_at: row.reviewed_at ?? null,
+    reviewed_by_actor: row.reviewed_by_actor ?? null,
+    source_event_id: sourceEventId,
+    payload,
+    payload_summary: summarizeProposalPayload(payload),
+    ...queueMetadata,
   };
 }
 
@@ -170,7 +203,7 @@ function scopeRank(scopeKind, defaultScopeKind = "private") {
   return index >= 0 ? index : SCOPE_ORDER.indexOf(defaultScopeKind);
 }
 
-function matchesScopeFilter(row, scopeFilter, defaultScopeKind = "private") {
+function _matchesScopeFilter(row, scopeFilter, defaultScopeKind = "private") {
   const filter = normalizeScopeFilter(scopeFilter);
   if (!filter?.scopeKind) {
     return true;
@@ -214,13 +247,14 @@ function compareClaimsForPriority(left, right) {
     return stateDelta;
   }
 
-  // v2.3: importance_score as tiebreaker after lifecycle_state
   const importanceDelta = Number(left?.importance_score ?? 1.0) - Number(right?.importance_score ?? 1.0);
   if (importanceDelta !== 0) {
     return importanceDelta;
   }
 
-  const confidenceDelta = Number(left?.confidence ?? 0) - Number(right?.confidence ?? 0);
+  const leftConfidence = Number(left?.truth?.effective_confidence ?? left?.effective_confidence ?? left?.confidence ?? 0);
+  const rightConfidence = Number(right?.truth?.effective_confidence ?? right?.effective_confidence ?? right?.confidence ?? 0);
+  const confidenceDelta = leftConfidence - rightConfidence;
   if (confidenceDelta !== 0) {
     return confidenceDelta;
   }
@@ -265,6 +299,93 @@ function sourceEventIdForResult(result) {
     ?? result?.payload?.ingestId
     ?? result?.payload?.eventId
     ?? null;
+}
+
+function timestampForResult(result) {
+  return result?.payload?.message_captured_at
+    ?? result?.payload?.captured_at
+    ?? result?.payload?.capturedAt
+    ?? result?.payload?.created_at
+    ?? result?.payload?.createdAt
+    ?? result?.payload?.valid_from
+    ?? result?.payload?.validFrom
+    ?? null;
+}
+
+function normalizeDedupText(value) {
+  return String(value ?? "")
+    .toLowerCase()
+    .replace(/[’']/g, "")
+    .replace(/[^a-z0-9]+/g, " ")
+    .trim()
+    .replace(/\s+/g, " ");
+}
+
+function canonicalDedupTextForResult(result) {
+  return normalizeDedupText(result?.summary ?? "");
+}
+
+function dedupEntityIdForResult(result) {
+  return result?.entityId
+    ?? result?.payload?.subject_entity_id
+    ?? result?.payload?.subjectEntityId
+    ?? result?.payload?.entity_id
+    ?? result?.payload?.entityId
+    ?? null;
+}
+
+function dedupFingerprintForResult(result) {
+  if (!STRUCTURED_EVIDENCE_TYPES.has(result?.type)) {
+    return null;
+  }
+
+  const normalizedSummary = canonicalDedupTextForResult(result);
+  if (!normalizedSummary || normalizedSummary.length < 12) {
+    return null;
+  }
+
+  return JSON.stringify({
+    type: result?.type ?? null,
+    entity_id: dedupEntityIdForResult(result),
+    summary: normalizedSummary,
+    lifecycle_state: result?.claim?.lifecycle_state ?? null,
+    resolution_key: result?.claim?.resolution_key ?? null,
+    temporal_support_label: result?.temporalSupportLabel ?? null,
+  });
+}
+
+function compareResultsForDedupPreference(left, right) {
+  const leftScore = Number(left?.score ?? 0);
+  const rightScore = Number(right?.score ?? 0);
+  if (leftScore !== rightScore) {
+    return leftScore - rightScore;
+  }
+
+  const familyRank = (item) => {
+    if (item?.targetFamily === "canonical") return 3;
+    if (item?.targetFamily === "conversational") return 1;
+    return 2;
+  };
+  const leftFamily = familyRank(left);
+  const rightFamily = familyRank(right);
+  if (leftFamily !== rightFamily) {
+    return leftFamily - rightFamily;
+  }
+
+  const provenanceRank = (item) => {
+    let rank = 0;
+    if (getObservationIdFromResult(item)) rank += 2;
+    if (sourceEventIdForResult(item)) rank += 1;
+    if (item?.claim?.id) rank += 1;
+    return rank;
+  };
+  const leftProvenance = provenanceRank(left);
+  const rightProvenance = provenanceRank(right);
+  if (leftProvenance !== rightProvenance) {
+    return leftProvenance - rightProvenance;
+  }
+
+  return String(timestampForResult(left) ?? "").localeCompare(String(timestampForResult(right) ?? ""));
 }
 
 function fitObjectToBudget(item, primaryField, tokenBudget) {
@@ -339,6 +460,38 @@ function normalizePacketIntent(intent) {
   return Object.prototype.hasOwnProperty.call(INTENT_STRATEGIES, normalized) ? normalized : null;
 }
 
+function normalizeOpenItemsKind(kind) {
+  const normalized = String(kind ?? "all").trim().toLowerCase();
+  return normalized || "all";
+}
+
+function normalizeRegistryQueryRequest(input = {}) {
+  const request = input && typeof input === "object" ? input : {};
+  const filtersInput = request.filters && typeof request.filters === "object" && !Array.isArray(request.filters)
+    ? request.filters
+    : {};
+
+  return {
+    name: String(request.name ?? "").trim().toLowerCase(),
+    query: String(request.query ?? "").trim(),
+    filters: {
+      ...filtersInput,
+      status: Object.prototype.hasOwnProperty.call(filtersInput, "status")
+        ? String(filtersInput.status ?? "").trim().toLowerCase()
+        : filtersInput.status,
+      date_from: Object.prototype.hasOwnProperty.call(filtersInput, "date_from")
+        ? String(filtersInput.date_from ?? "").trim()
+        : filtersInput.date_from,
+      date_to: Object.prototype.hasOwnProperty.call(filtersInput, "date_to")
+        ? String(filtersInput.date_to ?? "").trim()
+        : filtersInput.date_to,
+      tags: Array.isArray(filtersInput.tags)
+        ? [...new Set(filtersInput.tags.map((tag) => String(tag ?? "").trim().toLowerCase()).filter(Boolean))].sort()
+        : filtersInput.tags,
+    },
+  };
+}
+
 function resolveWorkingSetShare(strategy = null) {
   return clamp(0.3 - Number(strategy?.evidenceRatio ?? 0.45) * 0.1, 0.25, 0.3);
 }
@@ -396,18 +549,20 @@ function countUniqueIds(collections = []) {
 }
 
 export class ContextOS {
-  constructor({ rootDir, autoBackfillEmbeddings = true }) {
+  constructor({ rootDir, autoBackfillEmbeddings = true, deferInit = false }) {
     this.rootDir = rootDir;
     this.database = new ContextDatabase(path.join(rootDir, "data", "contextos.db"));
     this.telemetry = new TelemetryDatabase(path.join(rootDir, "data", "contextos_telemetry.db"));
     this.graph = new EntityGraph(this.database);
     this.classifier = new ObservationClassifier();
     this.guard = new InjectionGuard();
+    this.vectorIndex = new VectorIndex(768);
     this.retrieval = new RetrievalEngine({
       graph: this.graph,
       database: this.database,
       telemetry: this.telemetry,
       classifier: this.classifier,
+      vectorIndex: this.vectorIndex,
     });
     this.indexer = new DocumentIndexer({
       database: this.database,
@@ -420,14 +575,34 @@ export class ContextOS {
     // Monitoring counters (in-memory)
     this._packetsByIntent = {};
     this._briefsAssembled = 0;
+    // REQ-38: graph-version-aware packet assembly cache
+    this._assemblyCache = createAssemblyCache();
     // v2.3: preconscious buffer and dream cycle lock
     this.preconsciousBuffer = new PreconsciousBuffer(50);
     this._dreamCycleLock = false;
     this._lastDreamCycleTimestamp = null;
+    this._autoBackfillEmbeddings = autoBackfillEmbeddings;
+    this.ready = false;
+    if (!deferInit) {
+      this.graph.load();
+      this._rebuildVectorIndex();
+      if (autoBackfillEmbeddings) {
+        this.startEmbeddingBackfill();
+      }
+      this.ready = true;
+    }
+  }
+
+  async init() {
+    if (this.ready) {
+      return;
+    }
     this.graph.load();
-    if (autoBackfillEmbeddings) {
+    this._rebuildVectorIndex();
+    if (this._autoBackfillEmbeddings) {
       this.startEmbeddingBackfill();
     }
+    this.ready = true;
   }
 
   ensureConversation({ conversationId = null, title = "ContextOS Session" } = {}) {
@@ -753,10 +928,15 @@ export class ContextOS {
           return null;
         }
 
-        return this.database.upsertMessageEmbedding({
+        const result = this.database.upsertMessageEmbedding({
           messageId: message.id,
           embedding,
         });
+        this.vectorIndex?.insert(message.id, "message", embedding, {
+          scopeKind: message.scopeKind ?? message.scope_kind,
+          scopeId: message.scopeId ?? message.scope_id,
+        });
+        return result;
       } catch (error) {
         logEmbeddingWarning(`Failed to embed message ${message.id}`, error);
         return null;
@@ -791,10 +971,15 @@ export class ContextOS {
           return null;
         }
 
-        return this.database.upsertObservationEmbedding({
+        const result = this.database.upsertObservationEmbedding({
           observationId: observation.id,
           embedding,
         });
+        this.vectorIndex?.insert(observation.id, "observation", embedding, {
+          scopeKind: observation.scopeKind ?? observation.scope_kind,
+          scopeId: observation.scopeId ?? observation.scope_id,
+        });
+        return result;
       } catch (error) {
         logEmbeddingWarning(`Failed to embed observation ${observation.id}`, error);
         return null;
@@ -807,6 +992,62 @@ export class ContextOS {
     return this.trackBackgroundTask(task);
   }
 
+
+  _rebuildVectorIndex() {
+    if (!this.vectorIndex) {
+      return;
+    }
+
+    const messages = this.database.listEmbeddedMessages();
+    const observations = this.database.listEmbeddedObservations();
+    
+    // Include cluster level embeddings (L0 and L1 for scatter phase)
+    let clusterLevelEmbeddings = [];
+    try {
+      const clusterLevels = this.database.prepare(`
+        SELECT cluster_id, level, embedding
+        FROM cluster_level_embeddings
+        WHERE level IN (0, 1)
+      `).all();
+      
+      clusterLevelEmbeddings = clusterLevels.map((cl) => {
+        let embedding = cl.embedding;
+        // Deserialize if it's a blob
+        if (embedding instanceof Uint8Array) {
+          const bytes = embedding;
+          if (bytes.byteLength > 0 && bytes.byteLength % Float32Array.BYTES_PER_ELEMENT === 0) {
+            embedding = new Float32Array(bytes.buffer, bytes.byteOffset, bytes.byteLength / Float32Array.BYTES_PER_ELEMENT).slice();
+          }
+        }
+        return {
+          id: `cl:${cl.cluster_id}:${cl.level}`,
+          type: `cluster_l${cl.level}`,
+          embedding,
+        };
+      });
+    } catch (_err) {
+      // Cluster levels might not exist yet (graceful degradation)
+    }
+    
+    const items = [
+      ...messages.map((m) => ({
+        id: m.id,
+        type: "message",
+        embedding: m.embedding,
+        scopeKind: m.scopeKind ?? m.scope_kind,
+        scopeId: m.scopeId ?? m.scope_id,
+      })),
+      ...observations.map((o) => ({
+        id: o.id,
+        type: "observation",
+        embedding: o.embedding,
+        scopeKind: o.scope_kind,
+        scopeId: o.scope_id,
+      })),
+      ...clusterLevelEmbeddings,
+    ];
+    this.vectorIndex.rebuild(items);
+  }
 
   startEmbeddingBackfill() {
     if (this.startupEmbeddingBackfill) {
@@ -833,8 +1074,8 @@ export class ContextOS {
     const resolvedBatchSize = Math.max(1, Math.trunc(batchSize) || EMBEDDING_BACKFILL_BATCH_SIZE);
     const resolvedRate = Math.max(1, Math.trunc(rateLimitPerSecond) || EMBEDDING_BACKFILL_RATE_PER_SECOND);
     const intervalMs = Math.ceil((resolvedBatchSize / resolvedRate) * 1000);
-    let processedMessages;
-    let processedObservations;
+    let processedMessages = 0;
+    let processedObservations = 0;
 
     const backfillBatch = async ({
       kind,
@@ -976,6 +1217,46 @@ export class ContextOS {
     return this.retrieval.retrieve({ conversationId, queryText, scopeFilter });
   }
 
+  dedupeRankedEvidence(items = []) {
+    const rankedItems = Array.isArray(items) ? items : [];
+    const keptByFingerprint = new Map();
+    const deduped = [];
+    let droppedCount = 0;
+
+    for (const item of rankedItems) {
+      const fingerprint = dedupFingerprintForResult(item);
+      if (!fingerprint) {
+        deduped.push(item);
+        continue;
+      }
+
+      const existing = keptByFingerprint.get(fingerprint);
+      if (!existing) {
+        keptByFingerprint.set(fingerprint, { item, index: deduped.length });
+        deduped.push(item);
+        continue;
+      }
+
+      if (compareResultsForDedupPreference(item, existing.item) > 0) {
+        deduped[existing.index] = item;
+        keptByFingerprint.set(fingerprint, { item, index: existing.index });
+      }
+      droppedCount += 1;
+    }
+
+    return {
+      items: deduped,
+      diagnostics: {
+        applied: true,
+        before_count: rankedItems.length,
+        after_count: deduped.length,
+        dropped_count: droppedCount,
+        duplicate_group_count: rankedItems.length - deduped.length,
+        mode: "exact_normalized_structured_summary",
+      },
+    };
+  }
+
   buildRecallEvidence(items, scope = "all", tokenBudget = 2000) {
     const allowedTypes = RECALL_SCOPE_TYPES[scope] ?? RECALL_SCOPE_TYPES.all;
     const byEventId = new Map();
@@ -1010,6 +1291,9 @@ export class ContextOS {
         score: Number(Number(item.score ?? 0).toFixed(3)),
         source,
         claim: item.claim ?? null,
+        target_family: item.targetFamily ?? null,
+        artifact_kind: item.artifactKind ?? null,
+        retrieval_type: item.type ?? null,
       };
 
       if (!current || candidate.score > current.score) {
@@ -1068,12 +1352,17 @@ export class ContextOS {
   }
 
   fitCompactClaim(claim, tokenBudget = Number.POSITIVE_INFINITY, messageCache = null) {
+    const truth = claim?.truth ?? null;
     const fitted = fitObjectToBudget({
       id: claim.id,
       type: claim.claim_type ?? null,
       value: claim.value_text ?? claim.predicate ?? "",
       state: claim.lifecycle_state ?? null,
       confidence: Number(claim.confidence ?? 0),
+      effective_confidence: Number(truth?.effective_confidence ?? claim.effective_confidence ?? claim.confidence ?? 0),
+      support_count: Number(truth?.support_count ?? claim.support_count ?? 1),
+      has_conflict: Boolean(truth?.has_conflict ?? claim.has_conflict ?? false),
+      conflict_set_id: truth?.conflict_set_id ?? claim.conflict_set_id ?? null,
       entity_label: this.claimEntityLabel(claim),
       valid_from: claim.valid_from ?? null,
       source_event_id: this.resolveSourceEventId(claim.message_id, messageCache),
@@ -1444,40 +1733,50 @@ export class ContextOS {
     const normalizedLimit = Math.max(1, Math.trunc(limit || 6));
     const budget = Math.max(0, Math.trunc(tokenBudget));
     const messageCache = new Map();
-    const groups = new Map();
+    const candidateClaims = this.database.listRecentClaims({
+      scopeFilter,
+      entityIds: normalizedEntityIds.length ? normalizedEntityIds : null,
+      lifecycleStates: ["active", "candidate", "disputed"],
+      limit: Math.max(normalizedLimit * 8, 24),
+    });
+    const truthAnalysis = analyzeClaimsTruthSet(candidateClaims);
 
-    for (const claim of this.database.listDisputedClaims({ limit: Math.max(normalizedLimit * 4, 12) })) {
-      if (!matchesEntityFilter(claim, normalizedEntityIds) || !matchesScopeFilter(claim, scopeFilter)) {
-        continue;
-      }
+    const groups = truthAnalysis.conflicts
+      .map((conflict) => ({
+        ...conflict,
+        claims: conflict.claim_ids
+          .map((claimId) => {
+            const claim = candidateClaims.find((entry) => entry.id === claimId);
+            if (!claim) {
+              return null;
+            }
 
-      const key = claim.resolution_key ?? `${claim.claim_type}:${claimEntityId(claim) ?? "unknown"}:${claim.predicate ?? "unknown"}`;
-      const group = groups.get(key) ?? {
-        resolution_key: key,
-        claim_type: claim.claim_type,
-        entity_label: this.claimEntityLabel(claim),
-        claims: [],
-      };
-      group.claims.push(claim);
-      groups.set(key, group);
-    }
+            return {
+              ...claim,
+              truth: truthAnalysis.byClaimId.get(claim.id) ?? null,
+            };
+          })
+          .filter(Boolean),
+      }))
+      .filter((group) => group.claims.length > 0)
+      .sort((left, right) => right.claim_count - left.claim_count)
+      .slice(0, normalizedLimit);
 
     const result = [];
     let tokenCount = 0;
-    for (const group of [...groups.values()]
-      .sort((left, right) => right.claims.length - left.claims.length)
-      .slice(0, normalizedLimit)) {
+    for (const group of groups) {
       const compactClaims = group.claims
         .sort((left, right) => compareClaimsForPriority(right, left))
         .slice(0, 3)
         .map((claim) => this.fitCompactClaim(claim, Number.POSITIVE_INFINITY, messageCache)?.item)
         .filter(Boolean);
       const fitted = fitObjectToBudget({
+        conflict_set_id: group.conflict_set_id,
         resolution_key: group.resolution_key,
-        claim_type: group.claim_type,
-        entity_label: group.entity_label,
+        claim_type: group.claims[0]?.claim_type ?? null,
+        entity_label: this.claimEntityLabel(group.claims[0] ?? null),
         claims: compactClaims,
-        claim_count: group.claims.length,
+        claim_count: group.claim_count,
       }, null, Number.isFinite(budget) ? (budget - tokenCount) : Number.POSITIVE_INFINITY);
       if (!fitted) {
         continue;
@@ -1519,15 +1818,13 @@ export class ContextOS {
       .filter((claim) => !claimTypes || claimTypes.includes(claim.claim_type))
       .filter((claim) => normalizedStrategy.claimStates.includes(claim.lifecycle_state))
       .filter((claim) => !focusEntityIds.length || matchesEntityFilter(claim, focusEntityIds));
-    const claimsByFacet = new Map();
-
-    for (const claim of candidateClaims) {
-      const key = claim.facet_key ?? claim.resolution_key ?? claim.id;
-      const current = claimsByFacet.get(key);
-      if (!current || compareClaimsForPriority(claim, current) > 0) {
-        claimsByFacet.set(key, claim);
-      }
-    }
+    const truthAnalysis = analyzeClaimsTruthSet(candidateClaims);
+    const annotatedClaims = candidateClaims.map((claim) => ({
+      ...claim,
+      truth: truthAnalysis.byClaimId.get(claim.id) ?? null,
+    }));
+    const preferredClaims = selectPreferredClaimsByResolution(annotatedClaims)
+      .sort((left, right) => compareClaimsForPriority(right, left));
 
     const result = {
       focus_claims: [],
@@ -1543,7 +1840,7 @@ export class ContextOS {
     let remaining = Math.max(0, Math.trunc(tokenBudget));
     const messageCache = new Map();
 
-    for (const claim of [...claimsByFacet.values()].sort((left, right) => compareClaimsForPriority(right, left))) {
+    for (const claim of preferredClaims) {
       const fitted = this.fitCompactClaim(claim, remaining, messageCache);
       if (!fitted) {
         continue;
@@ -1770,6 +2067,19 @@ export class ContextOS {
       tokenBudget,
     } = normalizePacketRequest(input);
     const budget = clamp(Number(tokenBudget) || 2000, 256, 8000);
+    const currentGraphVersion = this.graph.getGraphVersion();
+    const cacheRequest = { conversationId, query, intent, scopeFilter, tokenBudget: budget };
+    const cached = this._assemblyCache.get("context-packet", cacheRequest, currentGraphVersion);
+    if (cached.status === "hit") {
+      this._packetsByIntent[cached.payload.intent] = (this._packetsByIntent[cached.payload.intent] ?? 0) + 1;
+      return {
+        ...cached.payload,
+        diagnostics: {
+          ...cached.payload.diagnostics,
+          cache_status: "hit",
+        },
+      };
+    }
     const trimmedQuery = String(query ?? "").trim();
     const explicitIntent = normalizePacketIntent(intent);
     const intentResolution = explicitIntent
@@ -1828,7 +2138,7 @@ export class ContextOS {
     // Monitoring: increment packets_assembled counter by intent
     this._packetsByIntent[classifiedIntent] = (this._packetsByIntent[classifiedIntent] ?? 0) + 1;
 
-    return {
+    const packet = {
       query: trimmedQuery,
       intent: classifiedIntent,
       graph_version: this.graph.getGraphVersion(),
@@ -1854,6 +2164,10 @@ export class ContextOS {
       high_signal_alerts: highSignalAlerts,
       diagnostics: {
         retrieval_latency_ms: retrieval?.latencyMs ?? 0,
+        retrieval_route: retrieval?.diagnostics?.route ?? null,
+        retrieval_target_families: retrieval?.diagnostics?.targetFamilies ?? null,
+        retrieval_temporal: retrieval?.diagnostics?.temporal ?? null,
+        retrieval_artifact_boundary: retrieval?.diagnostics?.artifactBoundary ?? null,
         assembly_latency_ms: assemblyLatencyMs,
         token_count: stablePrefix.tokenCount + activeState.tokenCount + workingSet.tokenCount + evidence.tokenCount,
         tier_tokens: {
@@ -1865,8 +2179,12 @@ export class ContextOS {
         intent_source: intentResolution.source ?? "default",
         seed_entities: (retrieval?.seedEntities ?? []).map((entity) => entity.label).filter(Boolean),
         claims_scanned: workingSet.claims_scanned,
+        cache_status: `miss:${cached.reason}`,
       },
     };
+
+    this._assemblyCache.set("context-packet", cacheRequest, currentGraphVersion, packet);
+    return packet;
   }
 
   async memoryBrief(input = {}) {
@@ -1878,6 +2196,13 @@ export class ContextOS {
     } = normalizePacketRequest(input);
     const budget = clamp(Number(tokenBudget) || 1800, 256, 8000);
     const trimmedQuery = String(query ?? "").trim();
+    const currentGraphVersion = this.graph.getGraphVersion();
+    const cacheRequest = { conversationId, query: trimmedQuery, scopeFilter, tokenBudget: budget };
+    const cached = this._assemblyCache.get("memory-brief", cacheRequest, currentGraphVersion);
+    if (cached.status === "hit") {
+      this._briefsAssembled = (this._briefsAssembled ?? 0) + 1;
+      return cached.payload;
+    }
     const packet = await this.contextPacket({
       conversationId,
       query: trimmedQuery,
@@ -1919,7 +2244,7 @@ export class ContextOS {
     // Monitoring: increment briefs_assembled counter
     this._briefsAssembled = (this._briefsAssembled ?? 0) + 1;
 
-    return {
+    const brief = {
       ...briefPayload,
       token_count: estimateTokens(JSON.stringify(briefPayload)),
       claims_total: countUniqueIds([
@@ -1933,6 +2258,9 @@ export class ContextOS {
         briefPayload.unresolved_conflicts.flatMap((conflict) => conflict.claims ?? []),
       ]),
     };
+
+    this._assemblyCache.set("memory-brief", cacheRequest, currentGraphVersion, brief);
+    return brief;
   }
 
   async recall({ conversationId = null, query, mode = "hybrid", scope = "all", tokenBudget = 2000, scopeFilter = null }) {
@@ -1952,6 +2280,9 @@ export class ContextOS {
       total_results: assembled.totalResults,
       token_count: assembled.tokenCount,
       query: query ?? "",
+      route: retrieval?.diagnostics?.route ?? null,
+      latency_ms: retrieval?.latencyMs ?? null,
+      diagnostics: retrieval?.diagnostics ?? null,
     };
   }
 
@@ -1969,11 +2300,25 @@ export class ContextOS {
   }
 
   listOpenItems(kind = "all") {
-    const includeTasks = kind === "all" || kind === "tasks";
-    const includeDecisions = kind === "all" || kind === "decisions";
-    const includeConstraints = kind === "all" || kind === "constraints";
+    const normalizedKind = normalizeOpenItemsKind(kind);
+    const currentGraphVersion = this.graph.getGraphVersion();
+    const cached = this._assemblyCache.get("open-items", { kind: normalizedKind }, currentGraphVersion);
 
-    return {
+    if (cached.status === "hit") {
+      return {
+        ...cached.payload,
+        diagnostics: {
+          ...cached.payload.diagnostics,
+          cache_status: "hit",
+        },
+      };
+    }
+
+    const includeTasks = normalizedKind === "all" || normalizedKind === "tasks";
+    const includeDecisions = normalizedKind === "all" || normalizedKind === "decisions";
+    const includeConstraints = normalizedKind === "all" || normalizedKind === "constraints";
+
+    const payload = {
       tasks: includeTasks
         ? this.database.listOpenTasks().map((row) => ({
           id: row.id,
@@ -2004,10 +2349,30 @@ export class ContextOS {
           source_event_id: row.eventId ?? null,
         }))
         : [],
+      diagnostics: {
+        cache_status: `miss:${cached.reason}`,
+      },
     };
+
+    this._assemblyCache.set("open-items", { kind: normalizedKind }, currentGraphVersion, payload);
+    return payload;
   }
 
-  queryRegistry({ name, query = "", filters = {} }) {
+  queryRegistry(input = {}) {
+    const { name, query, filters } = normalizeRegistryQueryRequest(input);
+    const currentGraphVersion = this.graph.getGraphVersion();
+    const cached = this._assemblyCache.get("registry-query", { name, query, filters }, currentGraphVersion);
+
+    if (cached.status === "hit") {
+      return {
+        ...cached.payload,
+        diagnostics: {
+          ...cached.payload.diagnostics,
+          cache_status: "hit",
+        },
+      };
+    }
+
     const results = this.database.queryRegistry(name, { query, filters }).map((row) => {
       if (row.type === "task") {
         return {
@@ -2077,10 +2442,16 @@ export class ContextOS {
       };
     });
 
-    return {
+    const payload = {
       results,
       total: results.length,
+      diagnostics: {
+        cache_status: `miss:${cached.reason}`,
+      },
     };
+
+    this._assemblyCache.set("registry-query", { name, query, filters }, currentGraphVersion, payload);
+    return payload;
   }
 
   getEntityDetail(name, { includeRecentEvents = false } = {}) {
@@ -2136,11 +2507,10 @@ export class ContextOS {
 
     const detail = normalizeLabel(payload.title ?? payload.detail ?? payload.summary ?? null);
     const normalizedConfidence = clamp(Number(confidence) || 0.5, 0, 1);
-    // v2.3: classify write class and enforce approval rules
-    // auto: apply immediately; ai_proposed: queue for review (confidence gate handled by reviewer);
-    // canonical: always queue
     const writeClass = classifyWriteClass(type);
-    const shouldAutoApply = writeClass === "auto";
+    const disposition = getWriteClassDisposition(writeClass);
+    const shouldAutoApply = disposition.autoApply;
+    const _queueReason = disposition.queueReason;
 
     const stored = this.database.insertGraphProposal({
       conversationId: sourceMessage?.conversationId ?? null,
@@ -2180,6 +2550,11 @@ export class ContextOS {
             mutation_id: stored.id,
             status: "accepted",
             write_class: writeClass,
+            ...getQueuePressureDisposition({
+              writeClass,
+              status: "accepted",
+              confidence: normalizedConfidence,
+            }),
             applied,
           };
         }
@@ -2195,6 +2570,11 @@ export class ContextOS {
       mutation_id: stored.id,
       status: "proposed",
       write_class: writeClass,
+      ...getQueuePressureDisposition({
+        writeClass,
+        status: "proposed",
+        confidence: normalizedConfidence,
+      }),
     };
   }
 
@@ -2321,7 +2701,7 @@ export class ContextOS {
       throw new Error(`Mutation ${proposal.id} is missing detail/title`);
     }
 
-    const observationType = normalizedType === "breakthrough" || normalizedType === "profile"
+    const observationType = normalizedType === "breakthrough" || normalizedType === "profile" || normalizedType === "update_profile"
       ? "fact"
       : normalizedType;
     if (!["task", "decision", "constraint", "fact"].includes(observationType)) {
@@ -2405,64 +2785,238 @@ export class ContextOS {
     };
   }
 
-  reviewMutations({ action, mutationId = null, reason = null, actorId = "system" }) {
+  reviewMutations({ action, mutationId = null, mutationIds = null, reason = null, actorId = "system", filters = {} }) {
+    const invalidReviewPayload = (message) => {
+      const error = new Error(message);
+      error.statusCode = 400;
+      throw error;
+    };
+    const batchActions = {
+      apply_batch: "accepted",
+      reject_batch: "rejected",
+    };
+    const singleActions = {
+      apply: "accepted",
+      reject: "rejected",
+    };
+
     if (action === "list") {
-      const mutations = this.database
-        .listGraphProposals({ statuses: ["pending", "proposed"], limit: 200 })
-        .map((row) => ({
-          ...toProposalResponse(row),
-          payload: parseJson(row.payload_json, null),
-          source_event_id: row.message_id ? this.database.getMessage(row.message_id)?.ingestId ?? null : null,
-        }));
+      const defaultStatuses = ["pending", "proposed"];
+      const normalizeValues = (value) => Array.isArray(value)
+        ? value.map((entry) => String(entry ?? "").trim()).filter(Boolean)
+        : [];
+      const countBy = (rows, selector) => rows.reduce((accumulator, row) => {
+        const key = selector(row);
+        if (key) {
+          accumulator[key] = (accumulator[key] ?? 0) + 1;
+        }
+        return accumulator;
+      }, {});
+
+      const requestedStatuses = normalizeValues(filters.statuses);
+      if (filters.status && !requestedStatuses.length) {
+        requestedStatuses.push(String(filters.status).trim());
+      }
+
+      const requestedWriteClasses = normalizeValues(filters.writeClasses);
+      if (filters.writeClass && !requestedWriteClasses.length) {
+        requestedWriteClasses.push(String(filters.writeClass).trim());
+      }
+
+      const requestedProposalTypes = normalizeValues(filters.proposalTypes);
+      if (filters.proposalType && !requestedProposalTypes.length) {
+        requestedProposalTypes.push(String(filters.proposalType).trim());
+      }
+
+      const requestedTriage = String(filters.triage ?? "").trim() || null;
+      const includeParked = filters.includeParked === true
+        || String(filters.includeParked ?? "").trim().toLowerCase() === "true"
+        || requestedTriage === "parked_backlog";
+      const reviewQuery = {
+        statuses: requestedStatuses.length ? requestedStatuses : defaultStatuses,
+        writeClasses: requestedWriteClasses.length ? requestedWriteClasses : null,
+        proposalTypes: requestedProposalTypes.length ? requestedProposalTypes : null,
+        sourceEventId: filters.sourceEventId ?? filters.source_event_id ?? null,
+        minConfidence: filters.minConfidence ?? filters.min_confidence ?? null,
+        maxConfidence: filters.maxConfidence ?? filters.max_confidence ?? null,
+        sort: filters.sort ?? "newest",
+      };
+      const hasExplicitLimit = filters.limit !== null && filters.limit !== undefined && String(filters.limit).trim() !== "";
+      const limitValue = Number(filters.limit);
+      const resolvedLimit = hasExplicitLimit && Number.isFinite(limitValue)
+        ? Math.max(1, Math.trunc(limitValue))
+        : 200;
+      const applyQueueFilters = (rows) => rows.filter((row) => {
+        const metadata = getProposalQueueMetadata(row);
+        if (requestedTriage && metadata.triage !== requestedTriage) {
+          return false;
+        }
+
+        if (!includeParked && metadata.queue_bucket === "parked") {
+          return false;
+        }
+
+        return true;
+      });
+
+      const rawQueueRows = this.database.listGraphProposals({
+        statuses: reviewQuery.statuses,
+        limit: null,
+      });
+      const queueRows = applyQueueFilters(rawQueueRows);
+      const filteredRows = applyQueueFilters(this.database.listGraphProposals({
+        ...reviewQuery,
+        limit: null,
+      }));
+      const mutations = filteredRows
+        .slice(0, resolvedLimit)
+        .map((row) => toProposalResponse(row, { sourceEventId: row.source_event_id ?? null }));
 
       return {
         mutations,
-        total: mutations.length,
+        total: filteredRows.length,
+        returned: mutations.length,
+        applied_filters: {
+          statuses: reviewQuery.statuses,
+          write_classes: requestedWriteClasses,
+          proposal_types: requestedProposalTypes,
+          triage: requestedTriage,
+          include_parked: includeParked,
+          min_confidence: reviewQuery.minConfidence === null ? null : Number(reviewQuery.minConfidence),
+          max_confidence: reviewQuery.maxConfidence === null ? null : Number(reviewQuery.maxConfidence),
+          source_event_id: reviewQuery.sourceEventId ?? null,
+          sort: reviewQuery.sort,
+          limit: resolvedLimit,
+        },
+        summary: {
+          queue_total: queueRows.length,
+          parked_total: rawQueueRows.filter((row) => getProposalQueueMetadata(row).queue_bucket === "parked").length,
+          filtered_total: filteredRows.length,
+          by_status: countBy(filteredRows, (row) => row.status),
+          by_write_class: countBy(filteredRows, (row) => row.write_class ?? classifyWriteClass(row.proposal_type)),
+          by_proposal_type: countBy(filteredRows, (row) => row.proposal_type),
+          by_triage: countBy(filteredRows, (row) => getProposalQueueMetadata(row).triage),
+          by_queue_bucket: countBy(filteredRows, (row) => getProposalQueueMetadata(row).queue_bucket),
+          by_policy_decision: countBy(filteredRows, (row) => getProposalQueueMetadata(row).policy_decision),
+        },
       };
     }
 
-    if (!mutationId) {
-      throw new Error("mutation_id is required");
-    }
+    const normalizeBatchIds = (value) => {
+      if (!Array.isArray(value)) {
+        return null;
+      }
 
-    const proposal = this.database.getGraphProposal(mutationId);
-    if (!proposal) {
-      throw new Error(`Unknown mutation_id: ${mutationId}`);
-    }
+      return value
+        .map((entry) => String(entry ?? "").trim())
+        .filter(Boolean);
+    };
+    const reviewProposal = (proposal, nextStatus) => {
+      let applied = null;
+      if (nextStatus === "accepted") {
+        applied = this.applyGraphProposal(proposal, { actorId });
+      }
 
-    if (action === "reject") {
       const review = this.database.updateGraphProposalStatus(proposal.id, {
-        status: "rejected",
+        status: nextStatus,
         reason,
         actorId,
       });
       this.graph.updateGraphVersion(review.graphVersion);
 
       return {
-        ok: true,
         mutation_id: proposal.id,
-        status: "rejected",
-      };
-    }
-
-    if (action === "apply") {
-      const applied = this.applyGraphProposal(proposal, { actorId });
-      const review = this.database.updateGraphProposalStatus(proposal.id, {
-        status: "accepted",
-        reason,
-        actorId,
-      });
-      this.graph.updateGraphVersion(review.graphVersion);
-
-      return {
-        ok: true,
-        mutation_id: proposal.id,
-        status: "accepted",
+        status: nextStatus,
+        reason: review.reason,
+        reviewed_at: review.reviewedAt,
+        reviewed_by_actor: review.actorId,
         applied,
       };
+    };
+    const isReviewedStatus = (status) => ["accepted", "rejected"].includes(String(status ?? "").trim().toLowerCase());
+
+    if (action in batchActions) {
+      if (mutationId) {
+        invalidReviewPayload(`Ambiguous review payload: ${action} requires mutation_ids and does not accept mutation_id`);
+      }
+
+      const normalizedMutationIds = normalizeBatchIds(mutationIds);
+      if (normalizedMutationIds === null) {
+        invalidReviewPayload("mutation_ids must be an array for batch review");
+      }
+
+      if (!normalizedMutationIds.length) {
+        invalidReviewPayload("mutation_ids must contain at least one id");
+      }
+
+      const duplicates = normalizedMutationIds.filter((id, index) => normalizedMutationIds.indexOf(id) !== index);
+      if (duplicates.length) {
+        invalidReviewPayload(`mutation_ids contains duplicates: ${Array.from(new Set(duplicates)).join(", ")}`);
+      }
+
+      const proposals = this.database.getGraphProposalsByIds(normalizedMutationIds);
+      const foundIds = new Set(proposals.map((proposal) => proposal.id));
+      const unknownIds = normalizedMutationIds.filter((id) => !foundIds.has(id));
+      if (unknownIds.length) {
+        invalidReviewPayload(`Unknown mutation_ids: ${unknownIds.join(", ")}`);
+      }
+
+      const alreadyReviewed = proposals.filter((proposal) => isReviewedStatus(proposal.status));
+      if (alreadyReviewed.length) {
+        invalidReviewPayload(`Already reviewed mutation_ids: ${alreadyReviewed.map((proposal) => proposal.id).join(", ")}`);
+      }
+
+      const results = proposals.map((proposal) => reviewProposal(proposal, batchActions[action]));
+      const updatedMutations = this.database.getGraphProposalsByIds(normalizedMutationIds)
+        .map((proposal) => toProposalResponse(proposal, { sourceEventId: proposal.source_event_id ?? null }));
+
+      return {
+        ok: true,
+        action,
+        status: batchActions[action],
+        reason,
+        mutation_ids: normalizedMutationIds,
+        count: results.length,
+        mutations: updatedMutations,
+        results,
+      };
     }
 
-    throw new Error(`Unsupported action: ${action}`);
+    if (action in singleActions) {
+      if (mutationIds !== null && mutationIds !== undefined) {
+        invalidReviewPayload(`Ambiguous review payload: ${action} requires mutation_id and does not accept mutation_ids`);
+      }
+
+      if (!mutationId) {
+        invalidReviewPayload("mutation_id is required");
+      }
+
+      const proposal = this.database.getGraphProposal(mutationId);
+      if (!proposal) {
+        invalidReviewPayload(`Unknown mutation_id: ${mutationId}`);
+      }
+
+      if (action === "reject") {
+        const result = reviewProposal(proposal, singleActions[action]);
+        return {
+          ok: true,
+          mutation_id: proposal.id,
+          status: result.status,
+        };
+      }
+
+      if (action === "apply") {
+        const result = reviewProposal(proposal, singleActions[action]);
+        return {
+          ok: true,
+          mutation_id: proposal.id,
+          status: result.status,
+          applied: result.applied,
+        };
+      }
+    }
+
+    invalidReviewPayload(`Unsupported action: ${action}`);
   }
 
   getStatusData() {
@@ -2504,8 +3058,10 @@ export class ContextOS {
     const registries = this.database.getRegistryCounts();
     const embeddings = this.database.getEmbeddingCoverage();
 
+    const walCheck = this.database.checkWalIntegrity();
+
     return {
-      status: "ok",
+      status: walCheck.ok ? "ok" : "degraded",
       counts: dashboard.counts,
       graph_version: this.graph.getGraphVersion(),
       observation_categories: this.database.countObservationCategories(),
@@ -2516,12 +3072,14 @@ export class ContextOS {
       },
       pending_mutations: registries.pendingMutations,
       embeddings,
+      wal: walCheck,
     };
   }
 
   getClaimMetrics() {
     const claimStateStats = this.database.getClaimStateStats();
     const coverage = this.database.getClaimCoverageRatio();
+    const backfill = this.database.getClaimBackfillCoverage();
     const byState = Object.fromEntries(LIFECYCLE_STATES.map((state) => [state, 0]));
     const byType = Object.fromEntries(CLAIM_TYPE_VALUES.map((type) => [type, 0]));
     let total = 0;
@@ -2542,6 +3100,76 @@ export class ContextOS {
       by_type: byType,
       coverage_ratio: coverage.ratio,
       disputed_count: byState.disputed ?? 0,
+      backfill,
+    };
+  }
+
+  getClaimBackfillStatus() {
+    return this.database.getClaimBackfillCoverage();
+  }
+
+  backfillClaims({ limit = 100 } = {}) {
+    const candidates = this.database.listObservationsForClaimBackfill(limit);
+    const batch = {
+      attempted: 0,
+      claim_created: 0,
+      no_claim: 0,
+      failed: 0,
+      errors: [],
+    };
+
+    for (const observation of candidates) {
+      batch.attempted += 1;
+
+      try {
+        const existingClaim = this.database.getClaimByObservationId(observation.id);
+        if (existingClaim?.id) {
+          this.database.upsertClaimBackfillStatus({
+            observationId: observation.id,
+            status: "claim_created",
+            claimId: existingClaim.id,
+          });
+          batch.claim_created += 1;
+          continue;
+        }
+
+        const claim = ensureClaimForObservation(this.database, {
+          ...observation,
+          metadata: parseJson(observation.metadata_json),
+        });
+
+        if (claim?.id) {
+          this.database.upsertClaimBackfillStatus({
+            observationId: observation.id,
+            status: "claim_created",
+            claimId: claim.id,
+          });
+          batch.claim_created += 1;
+          continue;
+        }
+
+        this.database.upsertClaimBackfillStatus({
+          observationId: observation.id,
+          status: "no_claim",
+        });
+        batch.no_claim += 1;
+      } catch (error) {
+        this.database.upsertClaimBackfillStatus({
+          observationId: observation.id,
+          status: "failed",
+          errorMessage: error.message,
+        });
+        batch.failed += 1;
+        batch.errors.push({
+          observationId: observation.id,
+          message: error.message,
+        });
+      }
+    }
+
+    return {
+      batch,
+      status: this.database.getClaimBackfillCoverage(),
     };
   }
 
@@ -2598,6 +3226,7 @@ export class ContextOS {
     const blockedInbound = guardEvents.find((event) => event.role !== "assistant" && event.verdict === "block");
     const latestUser = [...messages].reverse().find((message) => message.role === "user");
     const latestUserCapture = [...captured].reverse().find((record) => record.message.role === "user");
+    const _latestCapture = captured.at(-1) ?? null;
     const retrieval = latestUser && !blockedInbound
       ? await this.retrieve({
           conversationId: conversation.id,

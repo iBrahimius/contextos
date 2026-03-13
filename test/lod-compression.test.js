@@ -13,7 +13,7 @@ class MockLLMClient {
     this.callCount = 0;
   }
 
-  async completeJSON(_params) {
+  async completeJSON(params) {
     this.callCount++;
     return this.response;
   }
@@ -143,7 +143,7 @@ test("persistLevels - skips empty level texts", async () => {
 
   let runCalls = [];
   const db = {
-    prepare: (_sql) => ({
+    prepare: (sql) => ({
       run: (...args) => {
         runCalls.push(args);
       },
@@ -164,7 +164,7 @@ test("persistLevels - computes character count correctly", async () => {
 
   let charCounts = [];
   const db = {
-    prepare: (_sql) => ({
+    prepare: (sql) => ({
       run: (...args) => {
         charCounts.push(args[4]);
       },

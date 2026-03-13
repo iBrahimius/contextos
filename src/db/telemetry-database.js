@@ -22,6 +22,32 @@ const TELEMETRY_SCHEMA_MIGRATIONS = [
     column: "actor_id",
     definition: "TEXT NOT NULL DEFAULT 'system'",
   },
+  // v2.4 — Advanced Retrieval telemetry extensions
+  {
+    table: "retrieval_queries",
+    column: "intent",
+    definition: "TEXT",
+  },
+  {
+    table: "retrieval_queries",
+    column: "cache_hit",
+    definition: "INTEGER DEFAULT 0",
+  },
+  {
+    table: "retrieval_queries",
+    column: "lod_levels_used",
+    definition: "TEXT",
+  },
+  {
+    table: "retrieval_queries",
+    column: "signal_contributions",
+    definition: "TEXT",
+  },
+  {
+    table: "retrieval_queries",
+    column: "ann_candidates",
+    definition: "INTEGER",
+  },
 ];
 
 function isPaginationRequest(value) {

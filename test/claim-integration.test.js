@@ -241,7 +241,7 @@ test("full pipeline creates claims from a persisted patch and exposes them in re
   }
 });
 
-test("contradictory claims supersede the older claim and registries return only the active winner", async () => {
+test("contradictory comparable claims remain disputed and visible instead of superseding a winner", async () => {
   const harness = await createHarness();
 
   try {
@@ -280,22 +280,22 @@ test("contradictory claims supersede the older claim and registries return only 
       createdAt: "2026-03-07T10:05:00.000Z",
     });
 
-    const supersededClaim = harness.contextOS.database.getClaim(first.claim.id);
-    const activeClaim = harness.contextOS.database.getClaim(second.claim.id);
+    const firstClaim = harness.contextOS.database.getClaim(first.claim.id);
+    const secondClaim = harness.contextOS.database.getClaim(second.claim.id);
 
-    assert.equal(supersededClaim?.lifecycle_state, "superseded");
-    assert.equal(activeClaim?.lifecycle_state, "active");
-    assert.equal(activeClaim?.supersedes_claim_id, supersededClaim?.id);
-    assert.equal(supersededClaim?.superseded_by_claim_id, activeClaim?.id);
+    assert.equal(firstClaim?.lifecycle_state, "disputed");
+    assert.equal(secondClaim?.lifecycle_state, "disputed");
+    assert.equal(firstClaim?.superseded_by_claim_id, null);
+    assert.equal(secondClaim?.supersedes_claim_id, null);
 
-    const registryResponse = await fetch(`${harness.baseUrl}/api/registries/decisions?entity_id=${dns.id}`);
-    assert.equal(registryResponse.status, 200);
-    const registryPayload = await registryResponse.json();
-
-    assert.equal(registryPayload.decisions.length, 1);
-    assert.equal(registryPayload.decisions[0].claims.length, 1);
-    assert.equal(registryPayload.decisions[0].claims[0].claimId, activeClaim?.id);
-    assert.match(registryPayload.decisions[0].claims[0].status, /route53/i);
+    const disputedResponse = await fetch(`${harness.baseUrl}/api/claims/disputed?limit=10`);
+    assert.equal(disputedResponse.status, 200);
+    const disputedPayload = await disputedResponse.json();
+    const disputedIds = disputedPayload.claims.map((claim) => claim.id);
+    assert.equal(disputedPayload.claims.filter((claim) => claim.resolution_key === firstClaim?.resolution_key).length, 2);
+    assert.ok(disputedPayload.claims.every((claim) => claim.truth?.has_conflict));
+    assert.ok(disputedIds.includes(firstClaim?.id));
+    assert.ok(disputedIds.includes(secondClaim?.id));
   } finally {
     await harness.close();
   }
@@ -564,6 +564,16 @@ test("GET /api/status includes aggregated claim metrics", async () => {
       },
       coverage_ratio: 1,
       disputed_count: 0,
+      backfill: {
+        total_observations: 3,
+        not_yet_processed: 0,
+        processed_with_claims: 3,
+        processed_with_no_claim: 0,
+        failed: 0,
+        processed: 3,
+        remaining: 0,
+        completion_ratio: 1,
+      },
     });
   } finally {
     await harness.close();
@@ -738,23 +748,121 @@ test("GET /api/claims/stats returns the claim type by lifecycle matrix", async (
   }
 });
 
-test("POST /api/claims/backfill returns the Task 6.1 stub response", async () => {
+test("POST /api/claims/backfill reports honest claim backfill progress", async () => {
   const harness = await createHarness();
 
   try {
+    const capture = await createMessage(harness, { content: "claim backfill status" });
+    const context = buildMessageContext(capture);
+    const subject = harness.contextOS.database.insertEntity({ label: "Backfill Entity", kind: "concept" });
+
+    const pendingObservation = insertObservationRecord(harness, context, {
+      category: "fact",
+      predicate: "status",
+      subjectEntityId: subject.id,
+      detail: "pending claim",
+    });
+    ensureClaimRecord(harness, context, {
+      category: "fact",
+      predicate: "status",
+      subjectEntityId: subject.id,
+      detail: "already has claim",
+    });
+    const noClaimObservation = insertObservationRecord(harness, context, {
+      category: "fact",
+      predicate: "status",
+      subjectEntityId: subject.id,
+      detail: "no claim extracted",
+    });
+    const failedObservation = insertObservationRecord(harness, context, {
+      category: "fact",
+      predicate: "status",
+      subjectEntityId: subject.id,
+      detail: "failed claim",
+    });
+
+    harness.contextOS.database.upsertClaimBackfillStatus({
+      observationId: noClaimObservation.id,
+      status: "no_claim",
+    });
+    harness.contextOS.database.upsertClaimBackfillStatus({
+      observationId: failedObservation.id,
+      status: "failed",
+      errorMessage: "boom",
+    });
+
     const response = await fetch(`${harness.baseUrl}/api/claims/backfill`, {
       method: "POST",
       headers: { "content-type": "application/json" },
-      body: JSON.stringify({ dry_run: true }),
+      body: JSON.stringify({ limit: 5 }),
     });
 
     assert.equal(response.status, 200);
     const payload = await response.json();
-    assert.deepEqual(payload, {
-      status: "not_implemented",
-      message: "Backfill available in Task 6.1",
-      graph_version: 0,
+    assert.equal(payload.batch.attempted, 2);
+    assert.equal(payload.batch.claim_created, 2);
+    assert.equal(payload.batch.no_claim, 0);
+    assert.equal(payload.batch.failed, 0);
+    assert.deepEqual(payload.batch.errors, []);
+    assert.deepEqual(payload.status, {
+      total_observations: 4,
+      not_yet_processed: 0,
+      processed_with_claims: 3,
+      processed_with_no_claim: 1,
+      failed: 0,
+      processed: 4,
+      remaining: 0,
+      completion_ratio: 1,
     });
+    assert.equal(payload.graph_version >= 0, true);
+
+    const statusResponse = await fetch(`${harness.baseUrl}/api/claims/backfill/status`);
+    assert.equal(statusResponse.status, 200);
+    const statusPayload = await statusResponse.json();
+    assert.deepEqual(statusPayload.backfill, payload.status);
+  } finally {
+    await harness.close();
+  }
+});
+
+test("POST /api/claims/backfill records failed attempts and leaves them retryable", async () => {
+  const harness = await createHarness();
+
+  try {
+    const capture = await createMessage(harness, { content: "claim backfill failure" });
+    const context = buildMessageContext(capture);
+    const subject = harness.contextOS.database.insertEntity({ label: "Failure Entity", kind: "concept" });
+    const observation = insertObservationRecord(harness, context, {
+      category: "fact",
+      predicate: "status",
+      subjectEntityId: subject.id,
+      detail: "should fail",
+    });
+
+    const originalInsertClaim = harness.contextOS.database.insertClaim.bind(harness.contextOS.database);
+    harness.contextOS.database.insertClaim = () => {
+      throw new Error("claim insert failed");
+    };
+
+    const response = await fetch(`${harness.baseUrl}/api/claims/backfill`, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ limit: 1 }),
+    });
+
+    harness.contextOS.database.insertClaim = originalInsertClaim;
+
+    assert.equal(response.status, 200);
+    const payload = await response.json();
+    assert.equal(payload.batch.attempted, 1);
+    assert.equal(payload.batch.claim_created, 0);
+    assert.equal(payload.batch.failed, 1);
+    assert.equal(payload.batch.errors[0].observationId, observation.id);
+    assert.equal(payload.status.failed, 1);
+    assert.equal(payload.status.not_yet_processed, 0);
+    assert.equal(payload.status.remaining, 0);
+    assert.equal(harness.contextOS.database.getClaimBackfillStatus(observation.id)?.status, "failed");
+    assert.equal(harness.contextOS.database.listObservationsForClaimBackfill().map((row) => row.id).includes(observation.id), true);
   } finally {
     await harness.close();
   }
@@ -777,6 +885,79 @@ test("POST /api/memory/consolidate returns the v2.3 stub response", async () => 
       message: "Consolidation available in v2.3",
       graph_version: 0,
     });
+  } finally {
+    await harness.close();
+  }
+});
+
+
+test("claim APIs expose truth metadata for conflicts and aggregated support", async () => {
+  const harness = await createHarness();
+
+  try {
+    const capture = await createMessage(harness, {
+      ingestId: "claim_truth_001",
+      content: "Resolve the DNS provider.",
+      scopeId: "proj-claim-truth",
+    });
+    const context = buildMessageContext(capture);
+    const dns = harness.contextOS.database.insertEntity({ label: "DNS", kind: "infrastructure" });
+    const cloudflare = harness.contextOS.database.insertEntity({ label: "Cloudflare", kind: "service" });
+    const route53 = harness.contextOS.database.insertEntity({ label: "Route53", kind: "service" });
+    const resolutionKey = `fact:${dns.id}:provider`;
+
+    const cloudflareClaim = insertClaimFixture(harness, context, {
+      claim_type: "fact",
+      subject_entity_id: dns.id,
+      object_entity_id: cloudflare.id,
+      predicate: "provider",
+      value_text: "Cloudflare",
+      lifecycle_state: "disputed",
+      confidence: 0.7,
+      resolution_key: resolutionKey,
+      facet_key: `fact|${dns.id}|provider|${cloudflare.id}|cloudflare`,
+    });
+    insertClaimFixture(harness, context, {
+      claim_type: "fact",
+      subject_entity_id: dns.id,
+      object_entity_id: cloudflare.id,
+      predicate: "provider",
+      value_text: "Cloudflare",
+      lifecycle_state: "disputed",
+      confidence: 0.8,
+      resolution_key: resolutionKey,
+      facet_key: `fact|${dns.id}|provider|${cloudflare.id}|cloudflare`,
+      created_at: "2026-03-07T10:01:00.000Z",
+    });
+    insertClaimFixture(harness, context, {
+      claim_type: "fact",
+      subject_entity_id: dns.id,
+      object_entity_id: route53.id,
+      predicate: "provider",
+      value_text: "Route53",
+      lifecycle_state: "disputed",
+      confidence: 0.85,
+      resolution_key: resolutionKey,
+      facet_key: `fact|${dns.id}|provider|${route53.id}|route53`,
+      created_at: "2026-03-07T10:02:00.000Z",
+    });
+
+    const disputedResponse = await fetch(`${harness.baseUrl}/api/claims/disputed?limit=10`);
+    assert.equal(disputedResponse.status, 200);
+    const disputedPayload = await disputedResponse.json();
+    const listedCloudflare = disputedPayload.claims.find((claim) => claim.value_text === "Cloudflare" && claim.resolution_key === resolutionKey);
+    assert.ok(listedCloudflare);
+    assert.equal(listedCloudflare.truth.support_count, 2);
+    assert.equal(listedCloudflare.truth.has_conflict, true);
+    assert.equal(listedCloudflare.truth.aggregated_confidence, 0.94);
+
+    const singleResponse = await fetch(`${harness.baseUrl}/api/claims/${cloudflareClaim.id}`);
+    assert.equal(singleResponse.status, 200);
+    const singlePayload = await singleResponse.json();
+    assert.equal(singlePayload.claim.truth.conflict_set_id, listedCloudflare.truth.conflict_set_id);
+    assert.equal(singlePayload.claim.truth.support_count, 2);
+
+    assert.ok(disputedPayload.claims.every((claim) => claim.truth?.has_conflict));
   } finally {
     await harness.close();
   }

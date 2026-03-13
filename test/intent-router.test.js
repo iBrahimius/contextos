@@ -15,7 +15,7 @@ function mockEntityGraph(labels = []) {
 // Mock LLM classifier
 function mockLlmClassifier(result) {
   return {
-    async classify() {
+    async classify(_query, _categories) {
       return result;
     },
   };

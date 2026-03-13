@@ -13,6 +13,10 @@ async function makeRoot() {
   return root;
 }
 
+function isKnowledgeItem(item) {
+  return Boolean(item.payload?.category || item.payload?.claim_type);
+}
+
 test("scope model stores message scope and filters retrieval evidence without hiding entities", async () => {
   const rootDir = await makeRoot();
   const contextOS = new ContextOS({ rootDir });
@@ -59,21 +63,23 @@ test("scope model stores message scope and filters retrieval evidence without hi
     queryText: "memory system",
   });
 
-  const sharedScopedObservationMessageIds = new Set(
+  const sharedScopedMessageIds = new Set(
     sharedScoped.items
-      .filter((item) => item.payload?.category)
-      .map((item) => item.payload.message_id),
+      .filter(isKnowledgeItem)
+      .map((item) => item.payload.message_id)
+      .filter(Boolean),
   );
-  const unfilteredObservationMessageIds = new Set(
+  const unfilteredMessageIds = new Set(
     unfiltered.items
-      .filter((item) => item.payload?.category)
-      .map((item) => item.payload.message_id),
+      .filter(isKnowledgeItem)
+      .map((item) => item.payload.message_id)
+      .filter(Boolean),
   );
 
-  assert.ok(sharedScopedObservationMessageIds.has(sharedCapture.message.id));
-  assert.ok(!sharedScopedObservationMessageIds.has(privateCapture.message.id));
-  assert.ok(unfilteredObservationMessageIds.has(sharedCapture.message.id));
-  assert.ok(unfilteredObservationMessageIds.has(privateCapture.message.id));
+  assert.ok(sharedScopedMessageIds.has(sharedCapture.message.id));
+  assert.ok(!sharedScopedMessageIds.has(privateCapture.message.id));
+  assert.ok(unfilteredMessageIds.has(sharedCapture.message.id));
+  assert.ok(unfilteredMessageIds.has(privateCapture.message.id));
 
   assert.ok(sharedScoped.expandedEntities.some((entity) => entity.label.toLowerCase() === "memory system"));
 });

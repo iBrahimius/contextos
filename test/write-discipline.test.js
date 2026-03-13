@@ -1,7 +1,12 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 
-import { WRITE_CLASS_RULES, classifyWriteClass } from "../src/core/write-discipline.js";
+import {
+  AI_PROPOSED_PARKING_THRESHOLD,
+  WRITE_CLASS_RULES,
+  classifyWriteClass,
+  getQueuePressureDisposition,
+} from "../src/core/write-discipline.js";
 
 // ── Auto types ───────────────────────────────────────────────────────
 
@@ -116,4 +121,47 @@ test("WRITE_CLASS_RULES — auto and canonical are disjoint sets", () => {
       `${type} should not be in both auto and canonical`,
     );
   }
+});
+
+// ── Queue-pressure policy ────────────────────────────────────────────
+
+test("getQueuePressureDisposition — low-confidence ai_proposed is parked, not auto-applied", () => {
+  const disposition = getQueuePressureDisposition({
+    writeClass: "ai_proposed",
+    status: "proposed",
+    confidence: AI_PROPOSED_PARKING_THRESHOLD - 0.01,
+  });
+
+  assert.equal(disposition.queue_bucket, "parked");
+  assert.equal(disposition.actionable, false);
+  assert.equal(disposition.triage, "parked_backlog");
+  assert.equal(disposition.queue_reason, "low_confidence_ai_proposed_parked");
+  assert.equal(disposition.policy_decision, "park_low_confidence_ai_proposed");
+});
+
+test("getQueuePressureDisposition — threshold ai_proposed stays in actionable review", () => {
+  const disposition = getQueuePressureDisposition({
+    writeClass: "ai_proposed",
+    status: "proposed",
+    confidence: AI_PROPOSED_PARKING_THRESHOLD,
+  });
+
+  assert.equal(disposition.queue_bucket, "actionable");
+  assert.equal(disposition.actionable, true);
+  assert.equal(disposition.triage, "ai_review");
+  assert.equal(disposition.queue_reason, "ai_proposed_requires_review");
+  assert.equal(disposition.policy_decision, "queue_ai_review");
+});
+
+test("getQueuePressureDisposition — canonical stays actionable regardless of confidence", () => {
+  const disposition = getQueuePressureDisposition({
+    writeClass: "canonical",
+    status: "proposed",
+    confidence: 0.1,
+  });
+
+  assert.equal(disposition.queue_bucket, "actionable");
+  assert.equal(disposition.actionable, true);
+  assert.equal(disposition.triage, "human_canonical");
+  assert.equal(disposition.policy_decision, "queue_canonical_review");
 });

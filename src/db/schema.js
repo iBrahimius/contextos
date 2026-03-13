@@ -144,6 +144,34 @@ CREATE TABLE IF NOT EXISTS observation_clusters (
 CREATE INDEX IF NOT EXISTS idx_observation_clusters_episode ON observation_clusters(episode_id);
 CREATE INDEX IF NOT EXISTS idx_observation_clusters_time ON observation_clusters(time_span_start, time_span_end);
 
+-- ── Cluster LOD Levels (v2.4) ──────────────────────────────────────
+
+CREATE TABLE IF NOT EXISTS cluster_levels (
+  cluster_id TEXT NOT NULL REFERENCES observation_clusters(id) ON DELETE CASCADE,
+  level INTEGER NOT NULL,
+  text TEXT NOT NULL,
+  source_observation_ids TEXT,
+  char_count INTEGER,
+  generated_at TEXT NOT NULL DEFAULT (datetime('now')),
+  PRIMARY KEY (cluster_id, level)
+);
+
+CREATE TABLE IF NOT EXISTS cluster_level_embeddings (
+  cluster_id TEXT NOT NULL,
+  level INTEGER NOT NULL,
+  embedding BLOB NOT NULL,
+  model TEXT NOT NULL DEFAULT 'embeddinggemma-300m',
+  created_at TEXT NOT NULL DEFAULT (datetime('now')),
+  PRIMARY KEY (cluster_id, level),
+  FOREIGN KEY (cluster_id) REFERENCES observation_clusters(id) ON DELETE CASCADE
+);
+
+CREATE VIRTUAL TABLE IF NOT EXISTS cluster_level_fts USING fts5(
+  text,
+  cluster_id UNINDEXED,
+  level UNINDEXED
+);
+
 CREATE TABLE IF NOT EXISTS tasks (
   id TEXT PRIMARY KEY,
   observation_id TEXT NOT NULL REFERENCES observations(id) ON DELETE CASCADE,
@@ -237,6 +265,20 @@ CREATE INDEX IF NOT EXISTS idx_claims_resolution ON claims(resolution_key, facet
 CREATE INDEX IF NOT EXISTS idx_claims_lifecycle ON claims(lifecycle_state);
 CREATE INDEX IF NOT EXISTS idx_claims_conversation ON claims(conversation_id);
 CREATE INDEX IF NOT EXISTS idx_claims_valid_time ON claims(valid_from, valid_to);
+
+CREATE TABLE IF NOT EXISTS claim_backfill_status (
+  observation_id TEXT PRIMARY KEY REFERENCES observations(id) ON DELETE CASCADE,
+  status TEXT NOT NULL CHECK (status IN ('claim_created', 'no_claim', 'failed')),
+  claim_id TEXT REFERENCES claims(id) ON DELETE SET NULL,
+  error_message TEXT,
+  attempts INTEGER NOT NULL DEFAULT 0,
+  first_attempted_at TEXT,
+  last_attempted_at TEXT,
+  processed_at TEXT,
+  updated_at TEXT NOT NULL DEFAULT (datetime('now'))
+);
+
+CREATE INDEX IF NOT EXISTS idx_claim_backfill_status ON claim_backfill_status(status, updated_at);
 
 -- ── Documents ──────────────────────────────────────────────────────
 
