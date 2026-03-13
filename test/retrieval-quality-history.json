@@ -1254,7 +1254,7 @@
     ]
   },
   {
-    "timestamp": "2026-03-13T19:41:03.150Z",
+    "timestamp": "2026-03-13T20:08:40.290Z",
     "label": "baseline",
     "queryCount": 22,
     "avgPrecisionAt5": 0.121,
@@ -1263,11 +1263,11 @@
     "artifactLeakRate": 0.227,
     "p50LatencyMs": null,
     "p95LatencyMs": null,
-    "totalDurationMs": 3619,
+    "totalDurationMs": 3559,
     "byIntent": {
       "simple": {
         "count": 8,
-        "avgPrecision": 0.125,
+        "avgPrecision": 0.094,
         "avgMRR": 0.125,
         "passRate": 0.125,
         "artifactLeakRate": 0.125
@@ -1281,7 +1281,7 @@
       },
       "deep": {
         "count": 6,
-        "avgPrecision": 0.153,
+        "avgPrecision": 0.194,
         "avgMRR": 0.25,
         "passRate": 0.333,
         "artifactLeakRate": 0.333
@@ -1297,14 +1297,14 @@
       },
       "history_temporal": {
         "count": 6,
-        "avgPrecision": 0.208,
+        "avgPrecision": 0.167,
         "avgMRR": 0.222,
         "passRate": 0.5,
         "artifactLeakRate": 0.333
       },
       "why_explanatory": {
         "count": 3,
-        "avgPrecision": 0.306,
+        "avgPrecision": 0.389,
         "avgMRR": 0.5,
         "passRate": 0.667,
         "artifactLeakRate": 0.667
@@ -1502,7 +1502,7 @@
         "id": "deep-02",
         "intent": "deep",
         "route": "why_explanatory",
-        "precisionAt5": 0.25,
+        "precisionAt5": 0.5,
         "mrr": 1,
         "pass": true,
         "typeMatch": true,
@@ -1571,7 +1571,7 @@
         "precisionAt5": 0,
         "mrr": 0,
         "pass": true,
-        "typeMatch": false,
+        "typeMatch": true,
         "artifactViolations": [
           "term:audit"
         ],
@@ -1583,7 +1583,7 @@
         "id": "temporal-02",
         "intent": "simple",
         "route": "history_temporal",
-        "precisionAt5": 1,
+        "precisionAt5": 0.75,
         "mrr": 1,
         "pass": true,
         "typeMatch": true,
