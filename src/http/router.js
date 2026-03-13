@@ -12,6 +12,7 @@ const CONTENT_TYPES = {
   ".json": "application/json; charset=utf-8",
   ".svg": "image/svg+xml",
 };
+const CORS_ALLOW_HEADERS = "content-type, authorization";
 
 const cachedRegistry = createCachedRegistry(5000);
 
@@ -63,7 +64,7 @@ function enrichClaimTruth(contextOS, claim) {
 function sendJson(response, statusCode, payload) {
   response.writeHead(statusCode, {
     "Access-Control-Allow-Origin": "*",
-    "Access-Control-Allow-Headers": "content-type",
+    "Access-Control-Allow-Headers": CORS_ALLOW_HEADERS,
     "Access-Control-Allow-Methods": "GET,POST,PATCH,OPTIONS",
     "Content-Type": "application/json; charset=utf-8",
   });
@@ -160,7 +161,7 @@ export async function handleRequest(contextOS, rootDir, request, response) {
   if (request.method === "OPTIONS") {
     response.writeHead(204, {
       "Access-Control-Allow-Origin": "*",
-      "Access-Control-Allow-Headers": "content-type",
+      "Access-Control-Allow-Headers": CORS_ALLOW_HEADERS,
       "Access-Control-Allow-Methods": "GET,POST,PATCH,OPTIONS",
     });
     response.end();
@@ -169,6 +170,27 @@ export async function handleRequest(contextOS, rootDir, request, response) {
 
   const url = new URL(request.url, "http://localhost");
   const { pathname } = url;
+  const authToken = process.env.CONTEXTOS_AUTH_TOKEN ?? "";
+
+  if (
+    authToken
+    && pathname.startsWith("/api/")
+    && !(request.method === "GET" && pathname === "/api/health")
+  ) {
+    const authorizationHeader = request.headers.authorization ?? "";
+    const matchedToken = authorizationHeader.match(/^Bearer\s+(.+)$/i)?.[1] ?? null;
+
+    if (!authorizationHeader) {
+      sendJson(response, 401, { error: "Authentication required" });
+      return;
+    }
+
+    if (matchedToken !== authToken) {
+      sendJson(response, 403, { error: "Invalid authentication token" });
+      return;
+    }
+  }
+
   const pagination = parsePaginationParams(url.searchParams);
 
   try {
