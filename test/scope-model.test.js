@@ -6,6 +6,7 @@ import path from "node:path";
 
 import { ContextOS } from "../src/core/context-os.js";
 import { persistHeuristicPatchForMessage } from "./test-helpers.js";
+import { skipUnlessEmbeddings } from "./skip-guards.js";
 
 async function makeRoot() {
   const root = await fs.mkdtemp(path.join(os.tmpdir(), "contextos-"));
@@ -17,7 +18,7 @@ function isKnowledgeItem(item) {
   return Boolean(item.payload?.category || item.payload?.claim_type);
 }
 
-test("scope model stores message scope and filters retrieval evidence without hiding entities", async () => {
+test("scope model stores message scope and filters retrieval evidence without hiding entities", { skip: skipUnlessEmbeddings }, async () => {
   const rootDir = await makeRoot();
   const contextOS = new ContextOS({ rootDir });
   const conversation = contextOS.database.createConversation("Scope Model");
