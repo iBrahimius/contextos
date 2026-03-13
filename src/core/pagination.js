@@ -55,7 +55,7 @@ export function paginateResults(rows, limit = 50) {
       return row;
     }
 
-    const { _cursor_key: _, ...item } = row;
+    const { _cursor_key, ...item } = row;
     return item;
   });
   const nextCursor = hasMore && lastRow ? encodeCursor({ value: lastRow._cursor_key }) : null;

@@ -1,0 +1,27 @@
+[
+  {
+    "id": "entity-owner-claim",
+    "query": "Who owns ContextOS?",
+    "expectedIntent": "current-state",
+    "expectedClaimValue": "Ibrahim"
+  },
+  {
+    "id": "dns-current-truth",
+    "query": "What's our DNS provider now?",
+    "expectedIntent": "current-state",
+    "expectedClaimValue": "Route53",
+    "unexpectedClaimValue": "Cloudflare"
+  },
+  {
+    "id": "next-action-regression",
+    "query": "What should I work on next?",
+    "expectedIntent": "next-action",
+    "expectedTaskTitle": "Ship retrieval coverage audit"
+  },
+  {
+    "id": "constraint-regression",
+    "query": "What constraints should I keep in mind?",
+    "expectedIntent": "general",
+    "expectedConstraintValue": "Keep API compatibility"
+  }
+]

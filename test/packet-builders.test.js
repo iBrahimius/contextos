@@ -52,6 +52,7 @@ async function createHarness() {
           detail,
           confidence: overrides.confidence ?? 0.9,
           ...(overrides.subjectEntityId ? { subjectEntityId: overrides.subjectEntityId } : {}),
+          ...(overrides.subjectLabel ? { subjectLabel: overrides.subjectLabel } : {}),
           ...(overrides.metadata ? { metadata: overrides.metadata } : {}),
         }],
         entities: overrides.entities ?? [],
@@ -301,6 +302,58 @@ test("buildWorkingSet filters claims by strategy claim types", async () => {
   }
 });
 
+test("buildWorkingSet surfaces conflict-visible status claims while contradictory history remains queryable", async () => {
+  const harness = await createHarness();
+  try {
+    const entity = harness.contextOS.graph.ensureEntity({ label: "Claim lifecycle test", kind: "task" });
+
+    await harness.ingestAndPatch(
+      "Assistant inferred the task is pending",
+      "task",
+      "pending",
+      {
+        role: "assistant",
+        actorId: "agent:test",
+        subjectLabel: entity.label,
+        predicate: "status",
+      },
+    );
+    await harness.ingestAndPatch(
+      "User confirmed the task is active",
+      "task",
+      "active",
+      {
+        actorId: "user:test",
+        subjectLabel: entity.label,
+        predicate: "status",
+      },
+    );
+
+    const recentClaims = harness.contextOS.database.listRecentClaims({ limit: 10 }).filter(
+      (claim) => claim.predicate === "status" && ["pending", "active"].includes(claim.value_text),
+    );
+    const resolutionKey = recentClaims[0]?.resolution_key;
+    const history = harness.contextOS.database.listClaimsByResolutionKey(resolutionKey);
+    const ws = harness.contextOS.buildWorkingSet({
+      entityIds: [entity.id],
+      scopeFilter: { scopeKind: "project", scopeId: "proj-packets" },
+      tokenBudget: 600,
+    });
+    const matchingFocusClaims = ws.focus_claims.filter((claim) => claim.entity_label === entity.label);
+
+    assert.equal(recentClaims.length, 2);
+    assert.equal(history.length, 2);
+    assert.deepEqual(history.map((claim) => claim.lifecycle_state), ['disputed', 'disputed']);
+    assert.equal(matchingFocusClaims.length, 1);
+    assert.equal(matchingFocusClaims[0].state, 'disputed');
+    assert.equal(matchingFocusClaims[0].value, 'active');
+    assert.equal(matchingFocusClaims[0].has_conflict, true);
+    assert.equal(ws.unresolved_conflicts.length, 1);
+  } finally {
+    await harness.close();
+  }
+});
+
 // --- buildEvidence ---
 
 test("buildEvidence returns empty when no retrieval provided", async () => {
@@ -340,6 +393,124 @@ test("buildEvidence respects token budget", async () => {
 
     assert.ok(ev.tokenCount <= 250, // Allow some overhead
       `evidence token count ${ev.tokenCount} significantly exceeds budget`);
+  } finally {
+    await harness.close();
+  }
+});
+
+test("dedupeRankedEvidence removes exact normalized structured duplicates and prefers canonical items", async () => {
+  const harness = await createHarness();
+  try {
+    const duplicateCanonical = {
+      type: "fact",
+      id: "obs_canonical",
+      summary: "Cloudflare is the DNS provider.",
+      score: 0.081,
+      targetFamily: "canonical",
+      entityId: "ent_dns",
+      payload: {
+        subject_entity_id: "ent_dns",
+        created_at: "2026-03-11T10:00:00.000Z",
+        message_ingest_id: "evt_canonical",
+      },
+      claim: {
+        id: "claim_dns",
+        lifecycle_state: "active",
+        resolution_key: "fact:dns:provider",
+      },
+    };
+    const duplicateConversational = {
+      type: "fact",
+      id: "obs_conversational",
+      summary: "Cloudflare is the DNS provider",
+      score: 0.053,
+      targetFamily: "conversational",
+      entityId: "ent_dns",
+      payload: {
+        subject_entity_id: "ent_dns",
+        created_at: "2026-03-10T09:00:00.000Z",
+        message_ingest_id: "evt_conversational",
+      },
+      claim: {
+        id: "claim_dns",
+        lifecycle_state: "active",
+        resolution_key: "fact:dns:provider",
+      },
+    };
+    const distinctMessage = {
+      type: "message",
+      id: "msg_dns",
+      summary: "Current DNS should stay on Cloudflare.",
+      score: 0.02,
+      targetFamily: "conversational",
+      payload: {
+        message_ingest_id: "evt_message",
+        message_content: "Current DNS should stay on Cloudflare.",
+        message_captured_at: "2026-03-10T09:00:00.000Z",
+      },
+    };
+
+    const deduped = harness.contextOS.dedupeRankedEvidence([
+      duplicateConversational,
+      duplicateCanonical,
+      distinctMessage,
+    ]);
+
+    assert.equal(deduped.items.length, 2);
+    assert.equal(deduped.diagnostics.dropped_count, 1);
+    assert.equal(deduped.items[0].id, "obs_canonical");
+    assert.equal(deduped.items[1].id, "msg_dns");
+  } finally {
+    await harness.close();
+  }
+});
+
+test("dedupeRankedEvidence preserves temporal and lifecycle-distinct evidence", async () => {
+  const harness = await createHarness();
+  try {
+    const items = [
+      {
+        type: "fact",
+        id: "obs_active",
+        summary: "Cloudflare is the DNS provider.",
+        score: 0.08,
+        targetFamily: "canonical",
+        entityId: "ent_dns",
+        temporalSupportLabel: "current",
+        claim: {
+          id: "claim_active",
+          lifecycle_state: "active",
+          resolution_key: "fact:dns:provider",
+        },
+        payload: {
+          subject_entity_id: "ent_dns",
+          created_at: "2026-03-11T10:00:00.000Z",
+        },
+      },
+      {
+        type: "fact",
+        id: "obs_superseded",
+        summary: "Cloudflare is the DNS provider.",
+        score: 0.07,
+        targetFamily: "conversational",
+        entityId: "ent_dns",
+        temporalSupportLabel: "historical",
+        claim: {
+          id: "claim_old",
+          lifecycle_state: "superseded",
+          resolution_key: "fact:dns:provider",
+        },
+        payload: {
+          subject_entity_id: "ent_dns",
+          created_at: "2026-02-01T10:00:00.000Z",
+        },
+      },
+    ];
+
+    const deduped = harness.contextOS.dedupeRankedEvidence(items);
+
+    assert.equal(deduped.items.length, 2);
+    assert.equal(deduped.diagnostics.dropped_count, 0);
   } finally {
     await harness.close();
   }

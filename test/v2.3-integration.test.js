@@ -6,7 +6,7 @@ import os from "node:os";
 import path from "node:path";
 import { ContextOS } from "../src/core/context-os.js";
 import { handleRequest } from "../src/http/router.js";
-
+import { persistPatchForMessage } from "./test-helpers.js";
 
 async function makeRoot() {
   const root = await fs.mkdtemp(path.join(os.tmpdir(), "contextos-v23-integration-"));
@@ -365,6 +365,8 @@ test("compressObservationClusters marks originals as compressed", async () => {
 // ── Salience Tests ────────────────────────────────────────────────────
 
 test("checkSalience detects task blocked as high salience", () => {
+  const harness = { contextOS: null };
+
   // checkSalience is a pure method, but we need a ContextOS instance
   const rootDir = os.tmpdir();
   const contextOS = new ContextOS({ rootDir, autoBackfillEmbeddings: false });
@@ -722,14 +724,14 @@ test("6.2 Dream cycle: full cycle with test data creates observations, runs drea
     const context = buildMessageContext(msg);
 
     // Create task claim and constraint claim
-    insertClaimFixture(harness, context, {
+    const taskClaim = insertClaimFixture(harness, context, {
       claim_type: "task",
       predicate: "status",
       value_text: "blocked",
       confidence: 0.95,
     });
 
-    insertClaimFixture(harness, context, {
+    const constraintClaim = insertClaimFixture(harness, context, {
       claim_type: "constraint",
       predicate: "severity",
       value_text: "critical",
@@ -822,7 +824,7 @@ test("6.2 Dream cycle: concurrency lock returns 409 on parallel runs", async () 
   const harness = await createHarness();
 
   try {
-    await createMessage(harness);
+    const msg = await createMessage(harness);
 
     // Start first cycle (don't await)
     const cycle1Promise = harness.contextOS.dreamCycle({

@@ -1,0 +1,1154 @@
+{
+  "version": "2.6.0-phase1",
+  "created": "2026-03-10",
+  "description": "Golden retrieval gate for ContextOS v2.6 Phase 1. Route-aware expectations only; no retrieval implementation changes.",
+  "scoring": {
+    "precision_at_k": 5,
+    "mrr_cutoff": 10,
+    "pass_threshold": "expected_top1 appears in top-3 results"
+  },
+  "queries": [
+    {
+      "id": "simple-01",
+      "intent": "simple",
+      "query": "What DNS provider do we use?",
+      "rationale": "Direct factual lookup. Should return Cloudflare decision clearly.",
+      "expected_top1_type": "decision",
+      "expected_top1_contains": "Cloudflare",
+      "expected_in_top5": [
+        "Cloudflare DNS",
+        "all domains"
+      ],
+      "expected_absent": [],
+      "notes": "REVIEW: verify decision entity exists and is the canonical answer",
+      "route": "current_state",
+      "target_families": {
+        "primary": "canonical",
+        "secondary": [
+          "conversational"
+        ]
+      },
+      "artifact_exclusions": {
+        "boundary": "hard_exclude",
+        "families": [
+          "operational"
+        ],
+        "terms": [
+          "telemetry",
+          "benchmark",
+          "diagnostic",
+          "contextos.db",
+          "launchd",
+          "contextos_telemetry.db"
+        ],
+        "sources": [
+          "benchmark",
+          "diagnostic",
+          "telemetry",
+          "debug",
+          "audit"
+        ]
+      }
+    },
+    {
+      "id": "simple-02",
+      "intent": "simple",
+      "query": "Who is Ibrahim?",
+      "rationale": "Entity lookup. Should return Ibrahim entity card with key facts.",
+      "expected_top1_type": "entity",
+      "expected_top1_contains": "Ibrahim",
+      "expected_in_top5": [
+        "Ibrahim",
+        "ZeN"
+      ],
+      "expected_absent": [],
+      "notes": "REVIEW: what facts about Ibrahim should surface in top-5?",
+      "route": "entity_state",
+      "target_families": {
+        "primary": "canonical",
+        "secondary": [
+          "conversational"
+        ]
+      },
+      "artifact_exclusions": {
+        "boundary": "hard_exclude",
+        "families": [
+          "operational"
+        ],
+        "terms": [
+          "telemetry",
+          "benchmark",
+          "diagnostic",
+          "contextos.db",
+          "launchd"
+        ],
+        "sources": [
+          "benchmark",
+          "diagnostic",
+          "telemetry",
+          "debug",
+          "audit"
+        ]
+      }
+    },
+    {
+      "id": "simple-03",
+      "intent": "simple",
+      "query": "What is the price of Rumor Has It?",
+      "rationale": "Specific fact retrieval. Should return €34.99 + shipping.",
+      "expected_top1_type": "fact",
+      "expected_top1_contains": "34.99",
+      "expected_in_top5": [
+        "34.99",
+        "shipping"
+      ],
+      "expected_absent": [],
+      "notes": "REVIEW: is this stored as a fact or observation?",
+      "route": "current_state",
+      "target_families": {
+        "primary": "canonical",
+        "secondary": [
+          "conversational"
+        ]
+      },
+      "artifact_exclusions": {
+        "boundary": "hard_exclude",
+        "families": [
+          "operational"
+        ],
+        "terms": [
+          "telemetry",
+          "benchmark",
+          "diagnostic",
+          "contextos.db",
+          "launchd"
+        ],
+        "sources": [
+          "benchmark",
+          "diagnostic",
+          "telemetry",
+          "debug",
+          "audit"
+        ]
+      }
+    },
+    {
+      "id": "simple-04",
+      "intent": "simple",
+      "query": "What hosting platform do we use?",
+      "rationale": "Infrastructure fact. Should return Vercel.",
+      "expected_top1_type": "decision",
+      "expected_top1_contains": "Vercel",
+      "expected_in_top5": [
+        "Vercel",
+        "CNAME"
+      ],
+      "expected_absent": [],
+      "notes": "REVIEW: verify hosting decision is stored",
+      "route": "current_state",
+      "target_families": {
+        "primary": "canonical",
+        "secondary": [
+          "conversational"
+        ]
+      },
+      "artifact_exclusions": {
+        "boundary": "hard_exclude",
+        "families": [
+          "operational"
+        ],
+        "terms": [
+          "telemetry",
+          "benchmark",
+          "diagnostic",
+          "contextos.db",
+          "launchd"
+        ],
+        "sources": [
+          "benchmark",
+          "diagnostic",
+          "telemetry",
+          "debug",
+          "audit"
+        ]
+      }
+    },
+    {
+      "id": "simple-05",
+      "intent": "simple",
+      "query": "What is ContextOS?",
+      "rationale": "System entity lookup. Should return description of memory system.",
+      "expected_top1_type": "entity",
+      "expected_top1_contains": "memory",
+      "expected_in_top5": [
+        "memory",
+        "Node.js",
+        "local-first"
+      ],
+      "expected_absent": [],
+      "notes": "REVIEW: does the entity card capture this well?",
+      "route": "entity_state",
+      "target_families": {
+        "primary": "canonical",
+        "secondary": [
+          "conversational"
+        ]
+      },
+      "artifact_exclusions": {
+        "boundary": "hard_exclude",
+        "families": [
+          "operational"
+        ],
+        "terms": [
+          "telemetry",
+          "benchmark",
+          "diagnostic",
+          "contextos.db",
+          "launchd"
+        ],
+        "sources": [
+          "benchmark",
+          "diagnostic",
+          "telemetry",
+          "debug",
+          "audit"
+        ]
+      }
+    },
+    {
+      "id": "simple-06",
+      "intent": "simple",
+      "query": "What email service do we use for marketing?",
+      "rationale": "Specific tool choice. Should return Kit (ConvertKit).",
+      "expected_top1_type": "fact",
+      "expected_top1_contains": "Kit",
+      "expected_in_top5": [
+        "Kit",
+        "ConvertKit",
+        "email"
+      ],
+      "expected_absent": [],
+      "notes": "REVIEW: is this stored as decision or fact?",
+      "route": "current_state",
+      "target_families": {
+        "primary": "canonical",
+        "secondary": [
+          "conversational"
+        ]
+      },
+      "artifact_exclusions": {
+        "boundary": "hard_exclude",
+        "families": [
+          "operational"
+        ],
+        "terms": [
+          "telemetry",
+          "benchmark",
+          "diagnostic",
+          "contextos.db",
+          "launchd"
+        ],
+        "sources": [
+          "benchmark",
+          "diagnostic",
+          "telemetry",
+          "debug",
+          "audit"
+        ]
+      }
+    },
+    {
+      "id": "simple-07",
+      "intent": "simple",
+      "query": "What is the RHI COGS per unit?",
+      "rationale": "Precise number retrieval. Should return €6.50.",
+      "expected_top1_type": "fact",
+      "expected_top1_contains": "6.50",
+      "expected_in_top5": [
+        "6.50",
+        "COGS"
+      ],
+      "expected_absent": [],
+      "notes": "REVIEW: verify this specific number is in observations",
+      "route": "current_state",
+      "target_families": {
+        "primary": "canonical",
+        "secondary": [
+          "conversational"
+        ]
+      },
+      "artifact_exclusions": {
+        "boundary": "hard_exclude",
+        "families": [
+          "operational"
+        ],
+        "terms": [
+          "telemetry",
+          "benchmark",
+          "diagnostic",
+          "contextos.db",
+          "launchd"
+        ],
+        "sources": [
+          "benchmark",
+          "diagnostic",
+          "telemetry",
+          "debug",
+          "audit"
+        ]
+      }
+    },
+    {
+      "id": "hybrid-01",
+      "intent": "hybrid",
+      "query": "What happened with the RHI DNS cutover?",
+      "rationale": "Event sequence. Should return the cutover process and outcome.",
+      "expected_top1_type": "decision",
+      "expected_top1_contains": "DNS",
+      "expected_in_top5": [
+        "Cloudflare",
+        "rumorhas.it",
+        "cutover"
+      ],
+      "expected_absent": [],
+      "notes": "REVIEW: should surface the migration event + completion",
+      "route": "history_temporal",
+      "target_families": {
+        "primary": "conversational",
+        "secondary": [
+          "canonical"
+        ]
+      },
+      "artifact_exclusions": {
+        "boundary": "hard_exclude",
+        "families": [
+          "operational"
+        ],
+        "terms": [
+          "telemetry",
+          "benchmark",
+          "diagnostic",
+          "contextos.db",
+          "launchd"
+        ],
+        "sources": [
+          "benchmark",
+          "diagnostic",
+          "telemetry",
+          "debug",
+          "audit"
+        ]
+      }
+    },
+    {
+      "id": "hybrid-02",
+      "intent": "hybrid",
+      "query": "What is the status of the RHI business partner conversation?",
+      "rationale": "Current state of an ongoing situation. Should return deferred status + context.",
+      "expected_top1_type": "task",
+      "expected_top1_contains": "partner",
+      "expected_in_top5": [
+        "partner",
+        "deferred",
+        "face-to-face"
+      ],
+      "expected_absent": [],
+      "notes": "REVIEW: task vs fact vs observation — what type is this stored as?",
+      "route": "current_state",
+      "target_families": {
+        "primary": "canonical",
+        "secondary": [
+          "conversational"
+        ]
+      },
+      "artifact_exclusions": {
+        "boundary": "hard_exclude",
+        "families": [
+          "operational"
+        ],
+        "terms": [
+          "telemetry",
+          "benchmark",
+          "diagnostic",
+          "contextos.db",
+          "launchd"
+        ],
+        "sources": [
+          "benchmark",
+          "diagnostic",
+          "telemetry",
+          "debug",
+          "audit"
+        ]
+      }
+    },
+    {
+      "id": "hybrid-03",
+      "intent": "hybrid",
+      "query": "What did we build in ContextOS Phase 2?",
+      "rationale": "Historical summary. Should return Phase 2 integration work.",
+      "expected_top1_type": "fact",
+      "expected_top1_contains": "Phase 2",
+      "expected_in_top5": [
+        "Scribe",
+        "Total Recall",
+        "embeddings",
+        "Haiku"
+      ],
+      "expected_absent": [],
+      "notes": "REVIEW: are Phase milestones tracked as decisions or facts?",
+      "route": "history_temporal",
+      "target_families": {
+        "primary": "conversational",
+        "secondary": [
+          "canonical"
+        ]
+      },
+      "artifact_exclusions": {
+        "boundary": "hard_exclude",
+        "families": [
+          "operational"
+        ],
+        "terms": [
+          "telemetry",
+          "benchmark",
+          "diagnostic",
+          "contextos.db",
+          "launchd"
+        ],
+        "sources": [
+          "benchmark",
+          "diagnostic",
+          "telemetry",
+          "debug",
+          "audit"
+        ]
+      }
+    },
+    {
+      "id": "hybrid-04",
+      "intent": "hybrid",
+      "query": "What changes were made to Scribe recently?",
+      "rationale": "Recent history of a component. Should return Scribe v3 changes.",
+      "expected_top1_type": "fact",
+      "expected_top1_contains": "Scribe",
+      "expected_in_top5": [
+        "Scribe",
+        "v3",
+        "Haiku",
+        "enrich"
+      ],
+      "expected_absent": [],
+      "notes": "REVIEW: how recent is 'recently' — does the system handle temporal ambiguity?",
+      "route": "history_temporal",
+      "target_families": {
+        "primary": "conversational",
+        "secondary": [
+          "canonical"
+        ]
+      },
+      "artifact_exclusions": {
+        "boundary": "hard_exclude",
+        "families": [
+          "operational"
+        ],
+        "terms": [
+          "telemetry",
+          "benchmark",
+          "diagnostic",
+          "contextos.db",
+          "launchd",
+          "golden-retrieval"
+        ],
+        "sources": [
+          "benchmark",
+          "diagnostic",
+          "telemetry",
+          "debug",
+          "audit"
+        ]
+      }
+    },
+    {
+      "id": "hybrid-05",
+      "intent": "hybrid",
+      "query": "What projects are currently active?",
+      "rationale": "State query across multiple entities. Should list active projects.",
+      "expected_top1_type": "task",
+      "expected_top1_contains": "active",
+      "expected_in_top5": [
+        "ContextOS",
+        "Injector",
+        "Dashboard",
+        "RHI"
+      ],
+      "expected_absent": [
+        "ConceptualZen"
+      ],
+      "notes": "REVIEW: are project statuses tracked as facts, tasks, or entity properties?",
+      "route": "current_state",
+      "target_families": {
+        "primary": "canonical",
+        "secondary": [
+          "conversational"
+        ]
+      },
+      "artifact_exclusions": {
+        "boundary": "hard_exclude",
+        "families": [
+          "operational"
+        ],
+        "terms": [
+          "telemetry",
+          "benchmark",
+          "diagnostic",
+          "contextos.db",
+          "launchd"
+        ],
+        "sources": [
+          "benchmark",
+          "diagnostic",
+          "telemetry",
+          "debug",
+          "audit"
+        ]
+      }
+    },
+    {
+      "id": "hybrid-06",
+      "intent": "hybrid",
+      "query": "What trademarks does RHI have?",
+      "rationale": "Specific factual details about a known entity.",
+      "expected_top1_type": "fact",
+      "expected_top1_contains": "trademark",
+      "expected_in_top5": [
+        "Benelux",
+        "EUIPO",
+        "BOIP"
+      ],
+      "expected_absent": [],
+      "notes": "REVIEW: are trademark details stored as observations?",
+      "route": "entity_state",
+      "target_families": {
+        "primary": "canonical",
+        "secondary": [
+          "conversational"
+        ]
+      },
+      "artifact_exclusions": {
+        "boundary": "hard_exclude",
+        "families": [
+          "operational"
+        ],
+        "terms": [
+          "telemetry",
+          "benchmark",
+          "diagnostic",
+          "contextos.db",
+          "launchd"
+        ],
+        "sources": [
+          "benchmark",
+          "diagnostic",
+          "telemetry",
+          "debug",
+          "audit"
+        ]
+      }
+    },
+    {
+      "id": "hybrid-07",
+      "intent": "hybrid",
+      "query": "What was decided about local LLM usage in ContextOS?",
+      "rationale": "Decision history. Should return Haiku-only decision + modeld retirement.",
+      "expected_top1_type": "decision",
+      "expected_top1_contains": "Haiku",
+      "expected_in_top5": [
+        "Haiku",
+        "modeld",
+        "Qwen",
+        "retired"
+      ],
+      "expected_absent": [],
+      "notes": "REVIEW: is the 'Haiku-only classification' stored as a decision?",
+      "route": "history_temporal",
+      "target_families": {
+        "primary": "conversational",
+        "secondary": [
+          "canonical"
+        ]
+      },
+      "artifact_exclusions": {
+        "boundary": "hard_exclude",
+        "families": [
+          "operational"
+        ],
+        "terms": [
+          "telemetry",
+          "benchmark",
+          "diagnostic",
+          "contextos.db",
+          "launchd"
+        ],
+        "sources": [
+          "benchmark",
+          "diagnostic",
+          "telemetry",
+          "debug",
+          "audit"
+        ]
+      }
+    },
+    {
+      "id": "deep-01",
+      "intent": "deep",
+      "query": "Why did we choose Cloudflare for DNS instead of the previous provider?",
+      "rationale": "Decision rationale. Needs the reasoning, not just the fact.",
+      "expected_top1_type": "decision",
+      "expected_top1_contains": "Cloudflare",
+      "expected_in_top5": [
+        "Cloudflare",
+        "DNS",
+        "migration"
+      ],
+      "expected_absent": [],
+      "notes": "REVIEW: does the decision observation include rationale, or just the outcome?",
+      "route": "why_explanatory",
+      "target_families": {
+        "primary": "conversational",
+        "secondary": [
+          "canonical"
+        ]
+      },
+      "artifact_exclusions": {
+        "boundary": "hard_exclude",
+        "families": [
+          "operational"
+        ],
+        "terms": [
+          "telemetry",
+          "benchmark",
+          "diagnostic",
+          "contextos.db",
+          "launchd"
+        ],
+        "sources": [
+          "benchmark",
+          "diagnostic",
+          "telemetry",
+          "debug",
+          "audit"
+        ]
+      }
+    },
+    {
+      "id": "deep-02",
+      "intent": "deep",
+      "query": "Why did we retire modeld and Qwen in favor of Haiku for classification?",
+      "rationale": "Technical decision rationale. Should include quality comparison + duplicate issues.",
+      "expected_top1_type": "decision",
+      "expected_top1_contains": "Haiku",
+      "expected_in_top5": [
+        "quality",
+        "duplicate",
+        "4/6",
+        "Qwen"
+      ],
+      "expected_absent": [],
+      "notes": "REVIEW: is the quality comparison (4/6 vs Haiku) captured in observations?",
+      "route": "why_explanatory",
+      "target_families": {
+        "primary": "conversational",
+        "secondary": [
+          "canonical"
+        ]
+      },
+      "artifact_exclusions": {
+        "boundary": "hard_exclude",
+        "families": [
+          "operational"
+        ],
+        "terms": [
+          "telemetry",
+          "benchmark",
+          "diagnostic",
+          "contextos.db",
+          "launchd"
+        ],
+        "sources": [
+          "benchmark",
+          "diagnostic",
+          "telemetry",
+          "debug",
+          "audit"
+        ]
+      }
+    },
+    {
+      "id": "deep-03",
+      "intent": "deep",
+      "query": "What is Ibrahim's pattern around shipping public-facing work and how should I handle it?",
+      "rationale": "Behavioral insight. Should surface the visibility anxiety pattern.",
+      "expected_top1_type": "fact",
+      "expected_top1_contains": "visibility",
+      "expected_in_top5": [
+        "anxiety",
+        "perfectionism",
+        "public",
+        "delay"
+      ],
+      "expected_absent": [],
+      "notes": "REVIEW: is this captured as a preference, fact, or observation? How personal is too personal for retrieval?",
+      "route": "mixed",
+      "target_families": {
+        "primary": "canonical",
+        "secondary": [
+          "conversational"
+        ]
+      },
+      "artifact_exclusions": {
+        "boundary": "hard_exclude",
+        "families": [
+          "operational"
+        ],
+        "terms": [
+          "telemetry",
+          "benchmark",
+          "diagnostic",
+          "contextos.db",
+          "launchd"
+        ],
+        "sources": [
+          "benchmark",
+          "diagnostic",
+          "telemetry",
+          "debug",
+          "audit"
+        ]
+      }
+    },
+    {
+      "id": "deep-04",
+      "intent": "deep",
+      "query": "How does the ContextOS retrieval engine work and what are its known weaknesses?",
+      "rationale": "System architecture + assessment. Needs both description and critique.",
+      "expected_top1_type": "fact",
+      "expected_top1_contains": "retrieval",
+      "expected_in_top5": [
+        "graph",
+        "vector",
+        "hybrid",
+        "brute-force"
+      ],
+      "expected_absent": [],
+      "notes": "REVIEW: are architecture details captured as observations or just in code?",
+      "route": "mixed",
+      "target_families": {
+        "primary": "canonical",
+        "secondary": [
+          "conversational"
+        ]
+      },
+      "artifact_exclusions": {
+        "boundary": "hard_exclude",
+        "families": [
+          "operational"
+        ],
+        "terms": [
+          "telemetry",
+          "benchmark",
+          "diagnostic",
+          "contextos.db",
+          "launchd",
+          "retrieval-quality"
+        ],
+        "sources": [
+          "benchmark",
+          "diagnostic",
+          "telemetry",
+          "debug",
+          "audit"
+        ]
+      }
+    },
+    {
+      "id": "deep-05",
+      "intent": "deep",
+      "query": "What was the reasoning behind the LOD tiered compression design?",
+      "rationale": "Design rationale. Should surface research synthesis + Ibrahim's decisions.",
+      "expected_top1_type": "decision",
+      "expected_top1_contains": "LOD",
+      "expected_in_top5": [
+        "levels",
+        "compression",
+        "frustum",
+        "atoms"
+      ],
+      "expected_absent": [],
+      "notes": "REVIEW: is the LOD decision chain captured? Research → design → decision?",
+      "route": "why_explanatory",
+      "target_families": {
+        "primary": "conversational",
+        "secondary": [
+          "canonical"
+        ]
+      },
+      "artifact_exclusions": {
+        "boundary": "hard_exclude",
+        "families": [
+          "operational"
+        ],
+        "terms": [
+          "telemetry",
+          "benchmark",
+          "diagnostic",
+          "contextos.db",
+          "launchd"
+        ],
+        "sources": [
+          "benchmark",
+          "diagnostic",
+          "telemetry",
+          "debug",
+          "audit"
+        ]
+      }
+    },
+    {
+      "id": "deep-06",
+      "intent": "deep",
+      "query": "Why do we use zero npm dependencies in ContextOS and what are the tradeoffs?",
+      "rationale": "Architecture principle rationale. Should include both the decision and the costs.",
+      "expected_top1_type": "decision",
+      "expected_top1_contains": "npm",
+      "expected_in_top5": [
+        "zero",
+        "dependencies",
+        "Node.js",
+        "vendor"
+      ],
+      "expected_absent": [],
+      "notes": "REVIEW: is this captured with tradeoff context or just as a rule?",
+      "route": "mixed",
+      "target_families": {
+        "primary": "canonical",
+        "secondary": [
+          "conversational"
+        ]
+      },
+      "artifact_exclusions": {
+        "boundary": "hard_exclude",
+        "families": [
+          "operational"
+        ],
+        "terms": [
+          "telemetry",
+          "benchmark",
+          "diagnostic",
+          "contextos.db",
+          "launchd"
+        ],
+        "sources": [
+          "benchmark",
+          "diagnostic",
+          "telemetry",
+          "debug",
+          "audit"
+        ]
+      }
+    },
+    {
+      "id": "temporal-01",
+      "intent": "hybrid",
+      "query": "What did we work on last week?",
+      "rationale": "Temporal scoping. Should return work from roughly March 3-8.",
+      "expected_top1_type": "fact",
+      "expected_top1_contains": null,
+      "expected_in_top5": [
+        "dream cycle",
+        "v2.3",
+        "LOD research"
+      ],
+      "expected_absent": [],
+      "notes": "REVIEW: can the system handle relative temporal references? This is a known hard problem.",
+      "route": "history_temporal",
+      "target_families": {
+        "primary": "conversational",
+        "secondary": [
+          "canonical"
+        ]
+      },
+      "artifact_exclusions": {
+        "boundary": "hard_exclude",
+        "families": [
+          "operational"
+        ],
+        "terms": [
+          "telemetry",
+          "benchmark",
+          "diagnostic",
+          "contextos.db",
+          "launchd"
+        ],
+        "sources": [
+          "benchmark",
+          "diagnostic",
+          "telemetry",
+          "debug",
+          "audit"
+        ]
+      }
+    },
+    {
+      "id": "temporal-02",
+      "intent": "simple",
+      "query": "When was the Python Cortex retired?",
+      "rationale": "Date lookup. Should return 2026-03-06.",
+      "expected_top1_type": "fact",
+      "expected_top1_contains": "retired",
+      "expected_in_top5": [
+        "Python",
+        "Cortex",
+        "retired",
+        "2026-03-06"
+      ],
+      "expected_absent": [],
+      "notes": "REVIEW: is the retirement date stored as an event/fact?",
+      "route": "history_temporal",
+      "target_families": {
+        "primary": "conversational",
+        "secondary": [
+          "canonical"
+        ]
+      },
+      "artifact_exclusions": {
+        "boundary": "hard_exclude",
+        "families": [
+          "operational"
+        ],
+        "terms": [
+          "telemetry",
+          "benchmark",
+          "diagnostic",
+          "contextos.db",
+          "launchd"
+        ],
+        "sources": [
+          "benchmark",
+          "diagnostic",
+          "telemetry",
+          "debug",
+          "audit"
+        ]
+      }
+    }
+  ],
+  "route_classification_cases": [
+    {
+      "id": "route-01",
+      "query": "What DNS provider do we use?",
+      "expected_route": "current_state"
+    },
+    {
+      "id": "route-02",
+      "query": "Who is Ibrahim?",
+      "expected_route": "entity_state"
+    },
+    {
+      "id": "route-03",
+      "query": "What happened with the RHI DNS cutover?",
+      "expected_route": "history_temporal"
+    },
+    {
+      "id": "route-04",
+      "query": "Why did we choose Cloudflare for DNS instead of the previous provider?",
+      "expected_route": "why_explanatory"
+    },
+    {
+      "id": "route-05",
+      "query": "What is Ibrahim's pattern around shipping public-facing work and how should I handle it?",
+      "expected_route": "mixed"
+    },
+    {
+      "id": "route-06",
+      "query": "How does the ContextOS retrieval engine work and what are its known weaknesses?",
+      "expected_route": "mixed"
+    },
+    {
+      "id": "route-07",
+      "query": "What changes were made to Scribe recently?",
+      "expected_route": "history_temporal"
+    },
+    {
+      "id": "route-08",
+      "query": "What trademarks does RHI have?",
+      "expected_route": "entity_state"
+    }
+  ],
+  "artifact_audit_scenarios": [
+    {
+      "id": "artifact-current-state-01",
+      "minimum_artifact_violations": 2,
+      "minimum_operational_results": 1,
+      "fixture_query": {
+        "id": "audit-current-state-01",
+        "intent": "simple",
+        "route": "current_state",
+        "query": "What DNS provider do we use?",
+        "expected_in_top5": [
+          "Cloudflare DNS"
+        ],
+        "expected_top1_contains": "Cloudflare",
+        "expected_absent": [],
+        "target_families": {
+          "primary": "canonical",
+          "secondary": [
+            "conversational"
+          ]
+        },
+        "artifact_exclusions": {
+          "boundary": "hard_exclude",
+          "families": [
+            "operational"
+          ],
+          "terms": [
+            "telemetry",
+            "contextos.db",
+            "launchd"
+          ],
+          "sources": [
+            "diagnostic",
+            "benchmark",
+            "telemetry",
+            "audit"
+          ]
+        }
+      },
+      "mock_evidence": [
+        {
+          "event_id": "diag-001",
+          "role": "assistant",
+          "source": "telemetry",
+          "content": "launchd diagnostic dump for contextos.db and contextos_telemetry.db"
+        },
+        {
+          "event_id": "msg-001",
+          "role": "user",
+          "source": "memory",
+          "content": "DNS provider is Cloudflare for all domains.",
+          "claim": {
+            "resolution_key": "decision:dns:dns_provider"
+          }
+        }
+      ]
+    },
+    {
+      "id": "artifact-history-01",
+      "minimum_artifact_violations": 2,
+      "minimum_operational_results": 1,
+      "fixture_query": {
+        "id": "audit-history-01",
+        "intent": "hybrid",
+        "route": "history_temporal",
+        "query": "What changes were made to Scribe recently?",
+        "expected_in_top5": [
+          "Scribe",
+          "v3"
+        ],
+        "expected_top1_contains": "Scribe",
+        "expected_absent": [],
+        "target_families": {
+          "primary": "conversational",
+          "secondary": [
+            "canonical"
+          ]
+        },
+        "artifact_exclusions": {
+          "boundary": "hard_exclude",
+          "families": [
+            "operational"
+          ],
+          "terms": [
+            "benchmark",
+            "golden-retrieval",
+            "diagnostic"
+          ],
+          "sources": [
+            "benchmark",
+            "diagnostic",
+            "telemetry",
+            "audit"
+          ]
+        }
+      },
+      "mock_evidence": [
+        {
+          "event_id": "bench-001",
+          "role": "assistant",
+          "source": "benchmark",
+          "content": "golden-retrieval benchmark notes for Scribe diagnostic comparison"
+        },
+        {
+          "event_id": "msg-002",
+          "role": "assistant",
+          "source": "memory",
+          "content": "Scribe v3 added Haiku enrichment and better duplicate handling."
+        }
+      ]
+    },
+    {
+      "id": "artifact-why-01",
+      "minimum_artifact_violations": 2,
+      "minimum_operational_results": 1,
+      "fixture_query": {
+        "id": "audit-why-01",
+        "intent": "deep",
+        "route": "why_explanatory",
+        "query": "Why did we choose Cloudflare for DNS instead of the previous provider?",
+        "expected_in_top5": [
+          "Cloudflare",
+          "migration"
+        ],
+        "expected_top1_contains": "Cloudflare",
+        "expected_absent": [],
+        "target_families": {
+          "primary": "conversational",
+          "secondary": [
+            "canonical"
+          ]
+        },
+        "artifact_exclusions": {
+          "boundary": "hard_exclude",
+          "families": [
+            "operational"
+          ],
+          "terms": [
+            "diagnostic",
+            "telemetry",
+            "audit"
+          ],
+          "sources": [
+            "benchmark",
+            "diagnostic",
+            "telemetry",
+            "audit"
+          ]
+        }
+      },
+      "mock_evidence": [
+        {
+          "event_id": "audit-001",
+          "role": "assistant",
+          "source": "diagnostic",
+          "content": "retrieval diagnostic audit: telemetry showed route mismatch during DNS benchmark"
+        },
+        {
+          "event_id": "msg-003",
+          "role": "assistant",
+          "source": "memory",
+          "content": "We chose Cloudflare because the migration simplified DNS management across all domains."
+        }
+      ]
+    }
+  ]
+}

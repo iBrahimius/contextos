@@ -288,4 +288,82 @@ describe('Claim Database Methods', () => {
       });
     } finally { db.close(); await fs.rm(root, { recursive: true, force: true }); }
   });
+
+  it('rejects invalid lifecycle transitions', async () => {
+    const { db, root } = await makeTempDb();
+    const context = seedData(db);
+    try {
+      const claim = insertClaimFixture(db, context, {
+        observation_id: context.obs.id,
+        lifecycle_state: 'active',
+      });
+
+      assert.throws(
+        () => db.updateClaim(claim.id, { lifecycle_state: 'candidate' }),
+        /Invalid claim lifecycle transition: active -> candidate/,
+      );
+      assert.equal(db.getClaim(claim.id)?.lifecycle_state, 'active');
+    } finally { db.close(); await fs.rm(root, { recursive: true, force: true }); }
+  });
+
+  it('normalizes linked active claims to superseded and keeps them out of current truth', async () => {
+    const { db, root } = await makeTempDb();
+    const context = seedData(db);
+    try {
+      const newer = insertClaimFixture(db, context, {
+        observation_id: context.obs.id,
+        lifecycle_state: 'active',
+        value_text: 'new fact',
+      });
+      const older = insertClaimFixture(db, context, {
+        lifecycle_state: 'active',
+        superseded_by_claim_id: newer.id,
+        value_text: 'old fact',
+      });
+
+      assert.equal(older.lifecycle_state, 'superseded');
+      assert.ok(older.valid_to);
+      assert.deepEqual(db.listCurrentClaims().map((claim) => claim.id), [newer.id]);
+    } finally { db.close(); await fs.rm(root, { recursive: true, force: true }); }
+  });
+
+  it('tracks honest backfill coverage states', async () => {
+    const { db, root } = await makeTempDb();
+    const context = seedData(db);
+    try {
+      const withClaim = insertExtraObservation(db, context, { detail: 'with claim' });
+      const noClaim = insertExtraObservation(db, context, { detail: 'no claim yet' });
+      const failed = insertExtraObservation(db, context, { detail: 'failed claim' });
+      const pending = insertExtraObservation(db, context, { detail: 'still pending' });
+
+      db.insertClaim({
+        observation_id: withClaim.id,
+        conversation_id: context.conv.id,
+        message_id: context.msg.id,
+        actor_id: 'user',
+        claim_type: 'fact',
+        subject_entity_id: context.ent1.id,
+        predicate: 'status',
+        value_text: 'backfilled claim',
+        lifecycle_state: 'active',
+        source_type: 'explicit',
+      });
+      db.upsertClaimBackfillStatus({ observationId: noClaim.id, status: 'no_claim' });
+      db.upsertClaimBackfillStatus({ observationId: failed.id, status: 'failed', errorMessage: 'boom' });
+
+      assert.deepEqual(db.getClaimBackfillCoverage(), {
+        total_observations: 5,
+        not_yet_processed: 2,
+        processed_with_claims: 1,
+        processed_with_no_claim: 1,
+        failed: 1,
+        processed: 3,
+        remaining: 2,
+        completion_ratio: 0.6,
+      });
+      assert.equal(db.listObservationsForClaimBackfill().map((row) => row.id).includes(noClaim.id), false);
+      assert.equal(db.listObservationsForClaimBackfill().map((row) => row.id).includes(failed.id), true);
+      assert.equal(db.listObservationsForClaimBackfill().map((row) => row.id).includes(pending.id), true);
+    } finally { db.close(); await fs.rm(root, { recursive: true, force: true }); }
+  });
 });

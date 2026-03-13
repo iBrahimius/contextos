@@ -1,0 +1,1604 @@
+[
+  {
+    "timestamp": "2026-03-09T08:30:52.470Z",
+    "label": "after-importance",
+    "queryCount": 22,
+    "avgPrecisionAt5": 0.235,
+    "avgMRR": 0.307,
+    "passRate": 0.364,
+    "p50LatencyMs": null,
+    "p95LatencyMs": null,
+    "totalDurationMs": 3780,
+    "byIntent": {
+      "simple": {
+        "count": 8,
+        "avgPrecision": 0.10416666666666666,
+        "avgMRR": 0.21041666666666667,
+        "passRate": 0.25
+      },
+      "hybrid": {
+        "count": 8,
+        "avgPrecision": 0.20833333333333331,
+        "avgMRR": 0.3201388888888889,
+        "passRate": 0.375
+      },
+      "deep": {
+        "count": 6,
+        "avgPrecision": 0.4444444444444444,
+        "avgMRR": 0.4166666666666667,
+        "passRate": 0.5
+      }
+    },
+    "perQuery": [
+      {
+        "id": "simple-01",
+        "intent": "simple",
+        "precisionAt5": 0,
+        "mrr": 0.25,
+        "pass": false,
+        "typeMatch": false
+      },
+      {
+        "id": "simple-02",
+        "intent": "simple",
+        "precisionAt5": 0.5,
+        "mrr": 0.333,
+        "pass": true,
+        "typeMatch": false
+      },
+      {
+        "id": "simple-03",
+        "intent": "simple",
+        "precisionAt5": 0,
+        "mrr": 0,
+        "pass": false,
+        "typeMatch": false
+      },
+      {
+        "id": "simple-04",
+        "intent": "simple",
+        "precisionAt5": 0,
+        "mrr": 0,
+        "pass": false,
+        "typeMatch": false
+      },
+      {
+        "id": "simple-05",
+        "intent": "simple",
+        "precisionAt5": 0.333,
+        "mrr": 1,
+        "pass": true,
+        "typeMatch": false
+      },
+      {
+        "id": "simple-06",
+        "intent": "simple",
+        "precisionAt5": 0,
+        "mrr": 0,
+        "pass": false,
+        "typeMatch": false
+      },
+      {
+        "id": "simple-07",
+        "intent": "simple",
+        "precisionAt5": 0,
+        "mrr": 0,
+        "pass": false,
+        "typeMatch": false
+      },
+      {
+        "id": "hybrid-01",
+        "intent": "hybrid",
+        "precisionAt5": 0,
+        "mrr": 1,
+        "pass": true,
+        "typeMatch": false
+      },
+      {
+        "id": "hybrid-02",
+        "intent": "hybrid",
+        "precisionAt5": 0.667,
+        "mrr": 1,
+        "pass": true,
+        "typeMatch": false
+      },
+      {
+        "id": "hybrid-03",
+        "intent": "hybrid",
+        "precisionAt5": 0,
+        "mrr": 0,
+        "pass": false,
+        "typeMatch": false
+      },
+      {
+        "id": "hybrid-04",
+        "intent": "hybrid",
+        "precisionAt5": 1,
+        "mrr": 0.2,
+        "pass": false,
+        "typeMatch": false
+      },
+      {
+        "id": "hybrid-05",
+        "intent": "hybrid",
+        "precisionAt5": 0,
+        "mrr": 0.111,
+        "pass": false,
+        "typeMatch": false
+      },
+      {
+        "id": "hybrid-06",
+        "intent": "hybrid",
+        "precisionAt5": 0,
+        "mrr": 0.25,
+        "pass": false,
+        "typeMatch": false
+      },
+      {
+        "id": "hybrid-07",
+        "intent": "hybrid",
+        "precisionAt5": 0,
+        "mrr": 0,
+        "pass": false,
+        "typeMatch": false
+      },
+      {
+        "id": "deep-01",
+        "intent": "deep",
+        "precisionAt5": 0.667,
+        "mrr": 0,
+        "pass": false,
+        "typeMatch": false
+      },
+      {
+        "id": "deep-02",
+        "intent": "deep",
+        "precisionAt5": 0.25,
+        "mrr": 0.5,
+        "pass": true,
+        "typeMatch": false
+      },
+      {
+        "id": "deep-03",
+        "intent": "deep",
+        "precisionAt5": 0,
+        "mrr": 0,
+        "pass": false,
+        "typeMatch": false
+      },
+      {
+        "id": "deep-04",
+        "intent": "deep",
+        "precisionAt5": 1,
+        "mrr": 1,
+        "pass": true,
+        "typeMatch": false
+      },
+      {
+        "id": "deep-05",
+        "intent": "deep",
+        "precisionAt5": 0.5,
+        "mrr": 1,
+        "pass": true,
+        "typeMatch": false
+      },
+      {
+        "id": "deep-06",
+        "intent": "deep",
+        "precisionAt5": 0.25,
+        "mrr": 0,
+        "pass": false,
+        "typeMatch": true
+      },
+      {
+        "id": "temporal-01",
+        "intent": "hybrid",
+        "precisionAt5": 0,
+        "mrr": 0,
+        "pass": true,
+        "typeMatch": false
+      },
+      {
+        "id": "temporal-02",
+        "intent": "simple",
+        "precisionAt5": 0,
+        "mrr": 0.1,
+        "pass": false,
+        "typeMatch": false
+      }
+    ]
+  },
+  {
+    "timestamp": "2026-03-09T09:00:41.157Z",
+    "label": "after-ann",
+    "queryCount": 22,
+    "avgPrecisionAt5": 0.269,
+    "avgMRR": 0.152,
+    "passRate": 0.273,
+    "p50LatencyMs": null,
+    "p95LatencyMs": null,
+    "totalDurationMs": 5307,
+    "byIntent": {
+      "simple": {
+        "count": 8,
+        "avgPrecision": 0.15625,
+        "avgMRR": 0.16666666666666666,
+        "passRate": 0.375
+      },
+      "hybrid": {
+        "count": 8,
+        "avgPrecision": 0.34374999999999994,
+        "avgMRR": 0.13958333333333334,
+        "passRate": 0.25
+      },
+      "deep": {
+        "count": 6,
+        "avgPrecision": 0.3194444444444444,
+        "avgMRR": 0.14907407407407405,
+        "passRate": 0.16666666666666666
+      }
+    },
+    "perQuery": [
+      {
+        "id": "simple-01",
+        "intent": "simple",
+        "precisionAt5": 0,
+        "mrr": 0.5,
+        "pass": true,
+        "typeMatch": false
+      },
+      {
+        "id": "simple-02",
+        "intent": "simple",
+        "precisionAt5": 0.5,
+        "mrr": 0.5,
+        "pass": true,
+        "typeMatch": false
+      },
+      {
+        "id": "simple-03",
+        "intent": "simple",
+        "precisionAt5": 0,
+        "mrr": 0,
+        "pass": false,
+        "typeMatch": false
+      },
+      {
+        "id": "simple-04",
+        "intent": "simple",
+        "precisionAt5": 0,
+        "mrr": 0,
+        "pass": false,
+        "typeMatch": false
+      },
+      {
+        "id": "simple-05",
+        "intent": "simple",
+        "precisionAt5": 0,
+        "mrr": 0,
+        "pass": false,
+        "typeMatch": false
+      },
+      {
+        "id": "simple-06",
+        "intent": "simple",
+        "precisionAt5": 0,
+        "mrr": 0,
+        "pass": false,
+        "typeMatch": false
+      },
+      {
+        "id": "simple-07",
+        "intent": "simple",
+        "precisionAt5": 0,
+        "mrr": 0,
+        "pass": false,
+        "typeMatch": false
+      },
+      {
+        "id": "hybrid-01",
+        "intent": "hybrid",
+        "precisionAt5": 0.333,
+        "mrr": 0.25,
+        "pass": false,
+        "typeMatch": false
+      },
+      {
+        "id": "hybrid-02",
+        "intent": "hybrid",
+        "precisionAt5": 0,
+        "mrr": 0,
+        "pass": false,
+        "typeMatch": false
+      },
+      {
+        "id": "hybrid-03",
+        "intent": "hybrid",
+        "precisionAt5": 0,
+        "mrr": 0.167,
+        "pass": false,
+        "typeMatch": false
+      },
+      {
+        "id": "hybrid-04",
+        "intent": "hybrid",
+        "precisionAt5": 1,
+        "mrr": 0.5,
+        "pass": true,
+        "typeMatch": false
+      },
+      {
+        "id": "hybrid-05",
+        "intent": "hybrid",
+        "precisionAt5": 0.25,
+        "mrr": 0,
+        "pass": false,
+        "typeMatch": false
+      },
+      {
+        "id": "hybrid-06",
+        "intent": "hybrid",
+        "precisionAt5": 0,
+        "mrr": 0,
+        "pass": false,
+        "typeMatch": true
+      },
+      {
+        "id": "hybrid-07",
+        "intent": "hybrid",
+        "precisionAt5": 0.5,
+        "mrr": 0.2,
+        "pass": false,
+        "typeMatch": false
+      },
+      {
+        "id": "deep-01",
+        "intent": "deep",
+        "precisionAt5": 0.667,
+        "mrr": 0.25,
+        "pass": false,
+        "typeMatch": false
+      },
+      {
+        "id": "deep-02",
+        "intent": "deep",
+        "precisionAt5": 0.25,
+        "mrr": 0.2,
+        "pass": false,
+        "typeMatch": false
+      },
+      {
+        "id": "deep-03",
+        "intent": "deep",
+        "precisionAt5": 0,
+        "mrr": 0,
+        "pass": false,
+        "typeMatch": false
+      },
+      {
+        "id": "deep-04",
+        "intent": "deep",
+        "precisionAt5": 0,
+        "mrr": 0.111,
+        "pass": false,
+        "typeMatch": false
+      },
+      {
+        "id": "deep-05",
+        "intent": "deep",
+        "precisionAt5": 1,
+        "mrr": 0.333,
+        "pass": true,
+        "typeMatch": false
+      },
+      {
+        "id": "deep-06",
+        "intent": "deep",
+        "precisionAt5": 0,
+        "mrr": 0,
+        "pass": false,
+        "typeMatch": false
+      },
+      {
+        "id": "temporal-01",
+        "intent": "hybrid",
+        "precisionAt5": 0.667,
+        "mrr": 0,
+        "pass": true,
+        "typeMatch": true
+      },
+      {
+        "id": "temporal-02",
+        "intent": "simple",
+        "precisionAt5": 0.75,
+        "mrr": 0.333,
+        "pass": true,
+        "typeMatch": true
+      }
+    ]
+  },
+  {
+    "timestamp": "2026-03-09T13:13:11.467Z",
+    "label": "after-rrf",
+    "queryCount": 22,
+    "avgPrecisionAt5": 0.227,
+    "avgMRR": 0.244,
+    "passRate": 0.318,
+    "p50LatencyMs": null,
+    "p95LatencyMs": null,
+    "totalDurationMs": 13437,
+    "byIntent": {
+      "simple": {
+        "count": 8,
+        "avgPrecision": 0.15625,
+        "avgMRR": 0.3125,
+        "passRate": 0.375
+      },
+      "hybrid": {
+        "count": 8,
+        "avgPrecision": 0.26041666666666663,
+        "avgMRR": 0.22291666666666665,
+        "passRate": 0.375
+      },
+      "deep": {
+        "count": 6,
+        "avgPrecision": 0.27777777777777773,
+        "avgMRR": 0.18214285714285716,
+        "passRate": 0.16666666666666666
+      }
+    },
+    "perQuery": [
+      {
+        "id": "simple-01",
+        "intent": "simple",
+        "precisionAt5": 0,
+        "mrr": 1,
+        "pass": true,
+        "typeMatch": true
+      },
+      {
+        "id": "simple-02",
+        "intent": "simple",
+        "precisionAt5": 0.5,
+        "mrr": 1,
+        "pass": true,
+        "typeMatch": false
+      },
+      {
+        "id": "simple-03",
+        "intent": "simple",
+        "precisionAt5": 0,
+        "mrr": 0,
+        "pass": false,
+        "typeMatch": false
+      },
+      {
+        "id": "simple-04",
+        "intent": "simple",
+        "precisionAt5": 0,
+        "mrr": 0,
+        "pass": false,
+        "typeMatch": false
+      },
+      {
+        "id": "simple-05",
+        "intent": "simple",
+        "precisionAt5": 0,
+        "mrr": 0,
+        "pass": false,
+        "typeMatch": false
+      },
+      {
+        "id": "simple-06",
+        "intent": "simple",
+        "precisionAt5": 0,
+        "mrr": 0,
+        "pass": false,
+        "typeMatch": false
+      },
+      {
+        "id": "simple-07",
+        "intent": "simple",
+        "precisionAt5": 0,
+        "mrr": 0,
+        "pass": false,
+        "typeMatch": false
+      },
+      {
+        "id": "hybrid-01",
+        "intent": "hybrid",
+        "precisionAt5": 0.333,
+        "mrr": 0.333,
+        "pass": true,
+        "typeMatch": false
+      },
+      {
+        "id": "hybrid-02",
+        "intent": "hybrid",
+        "precisionAt5": 0,
+        "mrr": 0,
+        "pass": false,
+        "typeMatch": false
+      },
+      {
+        "id": "hybrid-03",
+        "intent": "hybrid",
+        "precisionAt5": 0,
+        "mrr": 0.2,
+        "pass": false,
+        "typeMatch": false
+      },
+      {
+        "id": "hybrid-04",
+        "intent": "hybrid",
+        "precisionAt5": 1,
+        "mrr": 1,
+        "pass": true,
+        "typeMatch": true
+      },
+      {
+        "id": "hybrid-05",
+        "intent": "hybrid",
+        "precisionAt5": 0.25,
+        "mrr": 0,
+        "pass": false,
+        "typeMatch": true
+      },
+      {
+        "id": "hybrid-06",
+        "intent": "hybrid",
+        "precisionAt5": 0,
+        "mrr": 0,
+        "pass": false,
+        "typeMatch": false
+      },
+      {
+        "id": "hybrid-07",
+        "intent": "hybrid",
+        "precisionAt5": 0.5,
+        "mrr": 0.25,
+        "pass": false,
+        "typeMatch": false
+      },
+      {
+        "id": "deep-01",
+        "intent": "deep",
+        "precisionAt5": 0.667,
+        "mrr": 0.25,
+        "pass": false,
+        "typeMatch": false
+      },
+      {
+        "id": "deep-02",
+        "intent": "deep",
+        "precisionAt5": 0.25,
+        "mrr": 0.2,
+        "pass": false,
+        "typeMatch": false
+      },
+      {
+        "id": "deep-03",
+        "intent": "deep",
+        "precisionAt5": 0,
+        "mrr": 0,
+        "pass": false,
+        "typeMatch": false
+      },
+      {
+        "id": "deep-04",
+        "intent": "deep",
+        "precisionAt5": 0,
+        "mrr": 0.143,
+        "pass": false,
+        "typeMatch": false
+      },
+      {
+        "id": "deep-05",
+        "intent": "deep",
+        "precisionAt5": 0.75,
+        "mrr": 0.5,
+        "pass": true,
+        "typeMatch": false
+      },
+      {
+        "id": "deep-06",
+        "intent": "deep",
+        "precisionAt5": 0,
+        "mrr": 0,
+        "pass": false,
+        "typeMatch": false
+      },
+      {
+        "id": "temporal-01",
+        "intent": "hybrid",
+        "precisionAt5": 0,
+        "mrr": 0,
+        "pass": true,
+        "typeMatch": false
+      },
+      {
+        "id": "temporal-02",
+        "intent": "simple",
+        "precisionAt5": 0.75,
+        "mrr": 0.5,
+        "pass": true,
+        "typeMatch": false
+      }
+    ]
+  },
+  {
+    "timestamp": "2026-03-09T13:16:18.596Z",
+    "label": "after-lod",
+    "queryCount": 22,
+    "avgPrecisionAt5": 0.227,
+    "avgMRR": 0.244,
+    "passRate": 0.318,
+    "p50LatencyMs": null,
+    "p95LatencyMs": null,
+    "totalDurationMs": 13630,
+    "byIntent": {
+      "simple": {
+        "count": 8,
+        "avgPrecision": 0.15625,
+        "avgMRR": 0.3125,
+        "passRate": 0.375
+      },
+      "hybrid": {
+        "count": 8,
+        "avgPrecision": 0.26041666666666663,
+        "avgMRR": 0.22291666666666665,
+        "passRate": 0.375
+      },
+      "deep": {
+        "count": 6,
+        "avgPrecision": 0.27777777777777773,
+        "avgMRR": 0.18214285714285716,
+        "passRate": 0.16666666666666666
+      }
+    },
+    "perQuery": [
+      {
+        "id": "simple-01",
+        "intent": "simple",
+        "precisionAt5": 0,
+        "mrr": 1,
+        "pass": true,
+        "typeMatch": true
+      },
+      {
+        "id": "simple-02",
+        "intent": "simple",
+        "precisionAt5": 0.5,
+        "mrr": 1,
+        "pass": true,
+        "typeMatch": false
+      },
+      {
+        "id": "simple-03",
+        "intent": "simple",
+        "precisionAt5": 0,
+        "mrr": 0,
+        "pass": false,
+        "typeMatch": false
+      },
+      {
+        "id": "simple-04",
+        "intent": "simple",
+        "precisionAt5": 0,
+        "mrr": 0,
+        "pass": false,
+        "typeMatch": false
+      },
+      {
+        "id": "simple-05",
+        "intent": "simple",
+        "precisionAt5": 0,
+        "mrr": 0,
+        "pass": false,
+        "typeMatch": false
+      },
+      {
+        "id": "simple-06",
+        "intent": "simple",
+        "precisionAt5": 0,
+        "mrr": 0,
+        "pass": false,
+        "typeMatch": false
+      },
+      {
+        "id": "simple-07",
+        "intent": "simple",
+        "precisionAt5": 0,
+        "mrr": 0,
+        "pass": false,
+        "typeMatch": false
+      },
+      {
+        "id": "hybrid-01",
+        "intent": "hybrid",
+        "precisionAt5": 0.333,
+        "mrr": 0.333,
+        "pass": true,
+        "typeMatch": false
+      },
+      {
+        "id": "hybrid-02",
+        "intent": "hybrid",
+        "precisionAt5": 0,
+        "mrr": 0,
+        "pass": false,
+        "typeMatch": false
+      },
+      {
+        "id": "hybrid-03",
+        "intent": "hybrid",
+        "precisionAt5": 0,
+        "mrr": 0.2,
+        "pass": false,
+        "typeMatch": false
+      },
+      {
+        "id": "hybrid-04",
+        "intent": "hybrid",
+        "precisionAt5": 1,
+        "mrr": 1,
+        "pass": true,
+        "typeMatch": true
+      },
+      {
+        "id": "hybrid-05",
+        "intent": "hybrid",
+        "precisionAt5": 0.25,
+        "mrr": 0,
+        "pass": false,
+        "typeMatch": true
+      },
+      {
+        "id": "hybrid-06",
+        "intent": "hybrid",
+        "precisionAt5": 0,
+        "mrr": 0,
+        "pass": false,
+        "typeMatch": false
+      },
+      {
+        "id": "hybrid-07",
+        "intent": "hybrid",
+        "precisionAt5": 0.5,
+        "mrr": 0.25,
+        "pass": false,
+        "typeMatch": false
+      },
+      {
+        "id": "deep-01",
+        "intent": "deep",
+        "precisionAt5": 0.667,
+        "mrr": 0.25,
+        "pass": false,
+        "typeMatch": false
+      },
+      {
+        "id": "deep-02",
+        "intent": "deep",
+        "precisionAt5": 0.25,
+        "mrr": 0.2,
+        "pass": false,
+        "typeMatch": false
+      },
+      {
+        "id": "deep-03",
+        "intent": "deep",
+        "precisionAt5": 0,
+        "mrr": 0,
+        "pass": false,
+        "typeMatch": false
+      },
+      {
+        "id": "deep-04",
+        "intent": "deep",
+        "precisionAt5": 0,
+        "mrr": 0.143,
+        "pass": false,
+        "typeMatch": false
+      },
+      {
+        "id": "deep-05",
+        "intent": "deep",
+        "precisionAt5": 0.75,
+        "mrr": 0.5,
+        "pass": true,
+        "typeMatch": false
+      },
+      {
+        "id": "deep-06",
+        "intent": "deep",
+        "precisionAt5": 0,
+        "mrr": 0,
+        "pass": false,
+        "typeMatch": false
+      },
+      {
+        "id": "temporal-01",
+        "intent": "hybrid",
+        "precisionAt5": 0,
+        "mrr": 0,
+        "pass": true,
+        "typeMatch": false
+      },
+      {
+        "id": "temporal-02",
+        "intent": "simple",
+        "precisionAt5": 0.75,
+        "mrr": 0.5,
+        "pass": true,
+        "typeMatch": false
+      }
+    ]
+  },
+  {
+    "timestamp": "2026-03-09T18:57:39.066Z",
+    "label": "after-claims-retrieval",
+    "queryCount": 22,
+    "avgPrecisionAt5": 0.284,
+    "avgMRR": 0.508,
+    "passRate": 0.545,
+    "p50LatencyMs": null,
+    "p95LatencyMs": null,
+    "totalDurationMs": 28594,
+    "byIntent": {
+      "simple": {
+        "count": 8,
+        "avgPrecision": 0.22916666666666666,
+        "avgMRR": 0.39583333333333337,
+        "passRate": 0.375
+      },
+      "hybrid": {
+        "count": 8,
+        "avgPrecision": 0.375,
+        "avgMRR": 0.625,
+        "passRate": 0.75
+      },
+      "deep": {
+        "count": 6,
+        "avgPrecision": 0.23611111111111108,
+        "avgMRR": 0.5,
+        "passRate": 0.5
+      }
+    },
+    "perQuery": [
+      {
+        "id": "simple-01",
+        "intent": "simple",
+        "precisionAt5": 0,
+        "mrr": 1,
+        "pass": true,
+        "typeMatch": false
+      },
+      {
+        "id": "simple-02",
+        "intent": "simple",
+        "precisionAt5": 0,
+        "mrr": 0.167,
+        "pass": false,
+        "typeMatch": false
+      },
+      {
+        "id": "simple-03",
+        "intent": "simple",
+        "precisionAt5": 0.5,
+        "mrr": 0,
+        "pass": false,
+        "typeMatch": true
+      },
+      {
+        "id": "simple-04",
+        "intent": "simple",
+        "precisionAt5": 0,
+        "mrr": 0,
+        "pass": false,
+        "typeMatch": false
+      },
+      {
+        "id": "simple-05",
+        "intent": "simple",
+        "precisionAt5": 0.333,
+        "mrr": 1,
+        "pass": true,
+        "typeMatch": false
+      },
+      {
+        "id": "simple-06",
+        "intent": "simple",
+        "precisionAt5": 0,
+        "mrr": 0,
+        "pass": false,
+        "typeMatch": true
+      },
+      {
+        "id": "simple-07",
+        "intent": "simple",
+        "precisionAt5": 0,
+        "mrr": 0,
+        "pass": false,
+        "typeMatch": true
+      },
+      {
+        "id": "hybrid-01",
+        "intent": "hybrid",
+        "precisionAt5": 0.667,
+        "mrr": 1,
+        "pass": true,
+        "typeMatch": false
+      },
+      {
+        "id": "hybrid-02",
+        "intent": "hybrid",
+        "precisionAt5": 0.333,
+        "mrr": 1,
+        "pass": true,
+        "typeMatch": false
+      },
+      {
+        "id": "hybrid-03",
+        "intent": "hybrid",
+        "precisionAt5": 0.5,
+        "mrr": 1,
+        "pass": true,
+        "typeMatch": true
+      },
+      {
+        "id": "hybrid-04",
+        "intent": "hybrid",
+        "precisionAt5": 0.25,
+        "mrr": 1,
+        "pass": true,
+        "typeMatch": false
+      },
+      {
+        "id": "hybrid-05",
+        "intent": "hybrid",
+        "precisionAt5": 0.75,
+        "mrr": 1,
+        "pass": true,
+        "typeMatch": false
+      },
+      {
+        "id": "hybrid-06",
+        "intent": "hybrid",
+        "precisionAt5": 0,
+        "mrr": 0,
+        "pass": false,
+        "typeMatch": false
+      },
+      {
+        "id": "hybrid-07",
+        "intent": "hybrid",
+        "precisionAt5": 0.5,
+        "mrr": 0,
+        "pass": false,
+        "typeMatch": false
+      },
+      {
+        "id": "deep-01",
+        "intent": "deep",
+        "precisionAt5": 0.667,
+        "mrr": 1,
+        "pass": true,
+        "typeMatch": false
+      },
+      {
+        "id": "deep-02",
+        "intent": "deep",
+        "precisionAt5": 0.5,
+        "mrr": 0,
+        "pass": false,
+        "typeMatch": false
+      },
+      {
+        "id": "deep-03",
+        "intent": "deep",
+        "precisionAt5": 0,
+        "mrr": 1,
+        "pass": true,
+        "typeMatch": false
+      },
+      {
+        "id": "deep-04",
+        "intent": "deep",
+        "precisionAt5": 0.25,
+        "mrr": 1,
+        "pass": true,
+        "typeMatch": false
+      },
+      {
+        "id": "deep-05",
+        "intent": "deep",
+        "precisionAt5": 0,
+        "mrr": 0,
+        "pass": false,
+        "typeMatch": false
+      },
+      {
+        "id": "deep-06",
+        "intent": "deep",
+        "precisionAt5": 0,
+        "mrr": 0,
+        "pass": false,
+        "typeMatch": false
+      },
+      {
+        "id": "temporal-01",
+        "intent": "hybrid",
+        "precisionAt5": 0,
+        "mrr": 0,
+        "pass": true,
+        "typeMatch": true
+      },
+      {
+        "id": "temporal-02",
+        "intent": "simple",
+        "precisionAt5": 1,
+        "mrr": 1,
+        "pass": true,
+        "typeMatch": false
+      }
+    ]
+  },
+  {
+    "timestamp": "2026-03-09T20:34:18.414Z",
+    "label": "v2_6_candidate",
+    "queryCount": 22,
+    "avgPrecisionAt5": 0.519,
+    "avgMRR": 0.606,
+    "passRate": 0.727,
+    "p50LatencyMs": null,
+    "p95LatencyMs": null,
+    "totalDurationMs": 26732,
+    "byIntent": {
+      "simple": {
+        "count": 8,
+        "avgPrecision": 0.6666666666666667,
+        "avgMRR": 0.65625,
+        "passRate": 0.75
+      },
+      "hybrid": {
+        "count": 8,
+        "avgPrecision": 0.4270833333333333,
+        "avgMRR": 0.59375,
+        "passRate": 0.75
+      },
+      "deep": {
+        "count": 6,
+        "avgPrecision": 0.4444444444444444,
+        "avgMRR": 0.5555555555555556,
+        "passRate": 0.6666666666666666
+      }
+    },
+    "perQuery": [
+      {
+        "id": "simple-01",
+        "intent": "simple",
+        "precisionAt5": 0,
+        "mrr": 1,
+        "pass": true,
+        "typeMatch": false
+      },
+      {
+        "id": "simple-02",
+        "intent": "simple",
+        "precisionAt5": 0.5,
+        "mrr": 0.5,
+        "pass": true,
+        "typeMatch": false
+      },
+      {
+        "id": "simple-03",
+        "intent": "simple",
+        "precisionAt5": 1,
+        "mrr": 0.25,
+        "pass": false,
+        "typeMatch": true
+      },
+      {
+        "id": "simple-04",
+        "intent": "simple",
+        "precisionAt5": 1,
+        "mrr": 1,
+        "pass": true,
+        "typeMatch": false
+      },
+      {
+        "id": "simple-05",
+        "intent": "simple",
+        "precisionAt5": 0.333,
+        "mrr": 1,
+        "pass": true,
+        "typeMatch": false
+      },
+      {
+        "id": "simple-06",
+        "intent": "simple",
+        "precisionAt5": 1,
+        "mrr": 0.5,
+        "pass": true,
+        "typeMatch": true
+      },
+      {
+        "id": "simple-07",
+        "intent": "simple",
+        "precisionAt5": 0.5,
+        "mrr": 0,
+        "pass": false,
+        "typeMatch": false
+      },
+      {
+        "id": "hybrid-01",
+        "intent": "hybrid",
+        "precisionAt5": 0.333,
+        "mrr": 0.5,
+        "pass": true,
+        "typeMatch": false
+      },
+      {
+        "id": "hybrid-02",
+        "intent": "hybrid",
+        "precisionAt5": 0.667,
+        "mrr": 1,
+        "pass": true,
+        "typeMatch": false
+      },
+      {
+        "id": "hybrid-03",
+        "intent": "hybrid",
+        "precisionAt5": 0.5,
+        "mrr": 1,
+        "pass": true,
+        "typeMatch": true
+      },
+      {
+        "id": "hybrid-04",
+        "intent": "hybrid",
+        "precisionAt5": 0.25,
+        "mrr": 1,
+        "pass": true,
+        "typeMatch": true
+      },
+      {
+        "id": "hybrid-05",
+        "intent": "hybrid",
+        "precisionAt5": 0.5,
+        "mrr": 1,
+        "pass": true,
+        "typeMatch": false
+      },
+      {
+        "id": "hybrid-06",
+        "intent": "hybrid",
+        "precisionAt5": 0.667,
+        "mrr": 0.25,
+        "pass": false,
+        "typeMatch": true
+      },
+      {
+        "id": "hybrid-07",
+        "intent": "hybrid",
+        "precisionAt5": 0.5,
+        "mrr": 0,
+        "pass": false,
+        "typeMatch": false
+      },
+      {
+        "id": "deep-01",
+        "intent": "deep",
+        "precisionAt5": 0.667,
+        "mrr": 1,
+        "pass": true,
+        "typeMatch": false
+      },
+      {
+        "id": "deep-02",
+        "intent": "deep",
+        "precisionAt5": 0.5,
+        "mrr": 0,
+        "pass": false,
+        "typeMatch": false
+      },
+      {
+        "id": "deep-03",
+        "intent": "deep",
+        "precisionAt5": 0,
+        "mrr": 0,
+        "pass": false,
+        "typeMatch": false
+      },
+      {
+        "id": "deep-04",
+        "intent": "deep",
+        "precisionAt5": 0.25,
+        "mrr": 1,
+        "pass": true,
+        "typeMatch": true
+      },
+      {
+        "id": "deep-05",
+        "intent": "deep",
+        "precisionAt5": 0.5,
+        "mrr": 0.333,
+        "pass": true,
+        "typeMatch": false
+      },
+      {
+        "id": "deep-06",
+        "intent": "deep",
+        "precisionAt5": 0.75,
+        "mrr": 1,
+        "pass": true,
+        "typeMatch": false
+      },
+      {
+        "id": "temporal-01",
+        "intent": "hybrid",
+        "precisionAt5": 0,
+        "mrr": 0,
+        "pass": true,
+        "typeMatch": false
+      },
+      {
+        "id": "temporal-02",
+        "intent": "simple",
+        "precisionAt5": 1,
+        "mrr": 1,
+        "pass": true,
+        "typeMatch": false
+      }
+    ]
+  },
+  {
+    "timestamp": "2026-03-13T15:07:20.302Z",
+    "label": "baseline",
+    "queryCount": 22,
+    "avgPrecisionAt5": 0.133,
+    "avgMRR": 0.205,
+    "passRate": 0.273,
+    "artifactLeakRate": 0.318,
+    "p50LatencyMs": null,
+    "p95LatencyMs": null,
+    "totalDurationMs": 3744,
+    "byIntent": {
+      "simple": {
+        "count": 8,
+        "avgPrecision": 0.125,
+        "avgMRR": 0.125,
+        "passRate": 0.125,
+        "artifactLeakRate": 0.125
+      },
+      "hybrid": {
+        "count": 8,
+        "avgPrecision": 0.094,
+        "avgMRR": 0.25,
+        "passRate": 0.375,
+        "artifactLeakRate": 0.375
+      },
+      "deep": {
+        "count": 6,
+        "avgPrecision": 0.194,
+        "avgMRR": 0.25,
+        "passRate": 0.333,
+        "artifactLeakRate": 0.5
+      }
+    },
+    "byRoute": {
+      "current_state": {
+        "count": 7,
+        "avgPrecision": 0.071,
+        "avgMRR": 0.143,
+        "passRate": 0.143,
+        "artifactLeakRate": 0.143
+      },
+      "history_temporal": {
+        "count": 6,
+        "avgPrecision": 0.208,
+        "avgMRR": 0.333,
+        "passRate": 0.5,
+        "artifactLeakRate": 0.5
+      },
+      "why_explanatory": {
+        "count": 3,
+        "avgPrecision": 0.389,
+        "avgMRR": 0.5,
+        "passRate": 0.667,
+        "artifactLeakRate": 1
+      },
+      "entity_state": {
+        "count": 3,
+        "avgPrecision": 0,
+        "avgMRR": 0,
+        "passRate": 0,
+        "artifactLeakRate": 0
+      },
+      "mixed": {
+        "count": 3,
+        "avgPrecision": 0,
+        "avgMRR": 0,
+        "passRate": 0,
+        "artifactLeakRate": 0
+      }
+    },
+    "perQuery": [
+      {
+        "id": "simple-01",
+        "intent": "simple",
+        "route": "current_state",
+        "precisionAt5": 0,
+        "mrr": 0,
+        "pass": false,
+        "typeMatch": false,
+        "artifactViolations": [],
+        "familyCounts": {}
+      },
+      {
+        "id": "simple-02",
+        "intent": "simple",
+        "route": "entity_state",
+        "precisionAt5": 0,
+        "mrr": 0,
+        "pass": false,
+        "typeMatch": false,
+        "artifactViolations": [],
+        "familyCounts": {}
+      },
+      {
+        "id": "simple-03",
+        "intent": "simple",
+        "route": "current_state",
+        "precisionAt5": 0,
+        "mrr": 0,
+        "pass": false,
+        "typeMatch": false,
+        "artifactViolations": [],
+        "familyCounts": {}
+      },
+      {
+        "id": "simple-04",
+        "intent": "simple",
+        "route": "current_state",
+        "precisionAt5": 0,
+        "mrr": 0,
+        "pass": false,
+        "typeMatch": false,
+        "artifactViolations": [],
+        "familyCounts": {}
+      },
+      {
+        "id": "simple-05",
+        "intent": "simple",
+        "route": "entity_state",
+        "precisionAt5": 0,
+        "mrr": 0,
+        "pass": false,
+        "typeMatch": false,
+        "artifactViolations": [],
+        "familyCounts": {}
+      },
+      {
+        "id": "simple-06",
+        "intent": "simple",
+        "route": "current_state",
+        "precisionAt5": 0,
+        "mrr": 0,
+        "pass": false,
+        "typeMatch": false,
+        "artifactViolations": [],
+        "familyCounts": {}
+      },
+      {
+        "id": "simple-07",
+        "intent": "simple",
+        "route": "current_state",
+        "precisionAt5": 0,
+        "mrr": 0,
+        "pass": false,
+        "typeMatch": false,
+        "artifactViolations": [],
+        "familyCounts": {}
+      },
+      {
+        "id": "hybrid-01",
+        "intent": "hybrid",
+        "route": "history_temporal",
+        "precisionAt5": 0,
+        "mrr": 0,
+        "pass": false,
+        "typeMatch": false,
+        "artifactViolations": [],
+        "familyCounts": {}
+      },
+      {
+        "id": "hybrid-02",
+        "intent": "hybrid",
+        "route": "current_state",
+        "precisionAt5": 0,
+        "mrr": 0,
+        "pass": false,
+        "typeMatch": false,
+        "artifactViolations": [],
+        "familyCounts": {}
+      },
+      {
+        "id": "hybrid-03",
+        "intent": "hybrid",
+        "route": "history_temporal",
+        "precisionAt5": 0,
+        "mrr": 0,
+        "pass": false,
+        "typeMatch": false,
+        "artifactViolations": [],
+        "familyCounts": {}
+      },
+      {
+        "id": "hybrid-04",
+        "intent": "hybrid",
+        "route": "history_temporal",
+        "precisionAt5": 0.25,
+        "mrr": 1,
+        "pass": true,
+        "typeMatch": true,
+        "artifactViolations": [
+          "term:launchd",
+          "term:audit"
+        ],
+        "familyCounts": {
+          "conversational": 5
+        }
+      },
+      {
+        "id": "hybrid-05",
+        "intent": "hybrid",
+        "route": "current_state",
+        "precisionAt5": 0.5,
+        "mrr": 1,
+        "pass": true,
+        "typeMatch": false,
+        "artifactViolations": [
+          "term:telemetry"
+        ],
+        "familyCounts": {
+          "canonical": 2
+        }
+      },
+      {
+        "id": "hybrid-06",
+        "intent": "hybrid",
+        "route": "entity_state",
+        "precisionAt5": 0,
+        "mrr": 0,
+        "pass": false,
+        "typeMatch": false,
+        "artifactViolations": [],
+        "familyCounts": {}
+      },
+      {
+        "id": "hybrid-07",
+        "intent": "hybrid",
+        "route": "history_temporal",
+        "precisionAt5": 0,
+        "mrr": 0,
+        "pass": false,
+        "typeMatch": false,
+        "artifactViolations": [],
+        "familyCounts": {}
+      },
+      {
+        "id": "deep-01",
+        "intent": "deep",
+        "route": "why_explanatory",
+        "precisionAt5": 0.667,
+        "mrr": 1,
+        "pass": true,
+        "typeMatch": false,
+        "artifactViolations": [
+          "term:audit"
+        ],
+        "familyCounts": {
+          "conversational": 5
+        }
+      },
+      {
+        "id": "deep-02",
+        "intent": "deep",
+        "route": "why_explanatory",
+        "precisionAt5": 0.25,
+        "mrr": 0,
+        "pass": false,
+        "typeMatch": false,
+        "artifactViolations": [
+          "term:launchd",
+          "term:audit"
+        ],
+        "familyCounts": {
+          "conversational": 5
+        }
+      },
+      {
+        "id": "deep-03",
+        "intent": "deep",
+        "route": "mixed",
+        "precisionAt5": 0,
+        "mrr": 0,
+        "pass": false,
+        "typeMatch": false,
+        "artifactViolations": [],
+        "familyCounts": {}
+      },
+      {
+        "id": "deep-04",
+        "intent": "deep",
+        "route": "mixed",
+        "precisionAt5": 0,
+        "mrr": 0,
+        "pass": false,
+        "typeMatch": false,
+        "artifactViolations": [],
+        "familyCounts": {}
+      },
+      {
+        "id": "deep-05",
+        "intent": "deep",
+        "route": "why_explanatory",
+        "precisionAt5": 0.25,
+        "mrr": 0.5,
+        "pass": true,
+        "typeMatch": false,
+        "artifactViolations": [
+          "term:benchmark",
+          "term:audit"
+        ],
+        "familyCounts": {
+          "conversational": 5
+        }
+      },
+      {
+        "id": "deep-06",
+        "intent": "deep",
+        "route": "mixed",
+        "precisionAt5": 0,
+        "mrr": 0,
+        "pass": false,
+        "typeMatch": false,
+        "artifactViolations": [],
+        "familyCounts": {}
+      },
+      {
+        "id": "temporal-01",
+        "intent": "hybrid",
+        "route": "history_temporal",
+        "precisionAt5": 0,
+        "mrr": 0,
+        "pass": true,
+        "typeMatch": true,
+        "artifactViolations": [
+          "term:telemetry"
+        ],
+        "familyCounts": {
+          "conversational": 5
+        }
+      },
+      {
+        "id": "temporal-02",
+        "intent": "simple",
+        "route": "history_temporal",
+        "precisionAt5": 1,
+        "mrr": 1,
+        "pass": true,
+        "typeMatch": true,
+        "artifactViolations": [
+          "term:launchd",
+          "term:audit"
+        ],
+        "familyCounts": {
+          "conversational": 5
+        }
+      }
+    ]
+  }
+]

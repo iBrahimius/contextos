@@ -1,6 +1,7 @@
 import fs from "node:fs/promises";
 import path from "node:path";
 import { createCachedRegistry } from "../core/claim-registries.js";
+import { analyzeClaimsTruthSet } from "../core/claim-resolution.js";
 import { normalizeEnrichment } from "../core/normalize-enrichment.js";
 import { getValidTransitions, validateTransition } from "../core/claim-types.js";
 
@@ -27,6 +28,36 @@ function resolveGraphVersion(contextOS) {
     contextOS?.database?.getGraphVersion?.() ??
     0,
   );
+}
+
+function enrichClaimsTruth(contextOS, claims) {
+  const normalizedClaims = Array.isArray(claims) ? claims.filter(Boolean) : [];
+  if (!normalizedClaims.length) {
+    return [];
+  }
+
+  const groupedClaims = new Map();
+  for (const claim of normalizedClaims) {
+    const resolutionKey = String(claim?.resolution_key ?? "").trim();
+    if (!resolutionKey) {
+      groupedClaims.set(claim.id, [claim]);
+      continue;
+    }
+
+    if (!groupedClaims.has(resolutionKey)) {
+      groupedClaims.set(resolutionKey, contextOS.database.listClaimsByResolutionKey(resolutionKey));
+    }
+  }
+
+  const truthAnalysis = analyzeClaimsTruthSet([...groupedClaims.values()].flat());
+  return normalizedClaims.map((claim) => ({
+    ...claim,
+    truth: truthAnalysis.byClaimId.get(claim.id) ?? null,
+  }));
+}
+
+function enrichClaimTruth(contextOS, claim) {
+  return enrichClaimsTruth(contextOS, claim ? [claim] : [])[0] ?? claim;
 }
 
 function sendJson(response, statusCode, payload) {
@@ -147,7 +178,15 @@ export async function handleRequest(contextOS, rootDir, request, response) {
     }
 
     if (request.method === "GET" && pathname === "/api/status") {
-      sendJson(response, 200, withGraphVersion(contextOS.getStatusData(), resolveGraphVersion(contextOS)));
+      const statusData = contextOS.ready
+        ? contextOS.getStatusData()
+        : { ready: false };
+      sendJson(response, 200, withGraphVersion(statusData, resolveGraphVersion(contextOS)));
+      return;
+    }
+
+    if (!contextOS.ready && pathname.startsWith("/api/")) {
+      sendJson(response, 503, { error: "initializing", ready: false });
       return;
     }
 
@@ -317,7 +356,10 @@ export async function handleRequest(contextOS, rootDir, request, response) {
         limit: parseIntegerParam(url.searchParams.get("limit"), 100, 1),
         offset: parseIntegerParam(url.searchParams.get("offset"), 0, 0),
       });
-      sendJson(response, 200, withGraphVersion(claims, resolveGraphVersion(contextOS)));
+      sendJson(response, 200, withGraphVersion({
+        ...claims,
+        claims: enrichClaimsTruth(contextOS, claims.claims),
+      }, resolveGraphVersion(contextOS)));
       return;
     }
 
@@ -359,7 +401,7 @@ export async function handleRequest(contextOS, rootDir, request, response) {
       const updatedClaim = contextOS.database.updateClaim(claim.id, {
         value_text: toState,
       });
-      sendJson(response, 200, withGraphVersion({ claim: updatedClaim }, resolveGraphVersion(contextOS)));
+      sendJson(response, 200, withGraphVersion({ claim: enrichClaimTruth(contextOS, updatedClaim) }, resolveGraphVersion(contextOS)));
       return;
     }
 
@@ -367,6 +409,7 @@ export async function handleRequest(contextOS, rootDir, request, response) {
       request.method === "GET"
       && pathname.startsWith("/api/claims/")
       && pathname !== "/api/claims/disputed"
+      && pathname !== "/api/claims/backfill/status"
     ) {
       const claimId = pathname.split("/")[3];
       const claim = contextOS.database.getClaim(claimId);
@@ -376,7 +419,7 @@ export async function handleRequest(contextOS, rootDir, request, response) {
         return;
       }
 
-      sendJson(response, 200, withGraphVersion({ claim }, resolveGraphVersion(contextOS)));
+      sendJson(response, 200, withGraphVersion({ claim: enrichClaimTruth(contextOS, claim) }, resolveGraphVersion(contextOS)));
       return;
     }
 
@@ -384,16 +427,23 @@ export async function handleRequest(contextOS, rootDir, request, response) {
       const claims = contextOS.database.listDisputedClaims({
         limit: parseIntegerParam(url.searchParams.get("limit"), 100, 1),
       });
-      sendJson(response, 200, withGraphVersion({ claims }, resolveGraphVersion(contextOS)));
+      sendJson(response, 200, withGraphVersion({ claims: enrichClaimsTruth(contextOS, claims) }, resolveGraphVersion(contextOS)));
+      return;
+    }
+
+    if (request.method === "GET" && pathname === "/api/claims/backfill/status") {
+      sendJson(response, 200, withGraphVersion({
+        backfill: contextOS.getClaimBackfillStatus(),
+      }, resolveGraphVersion(contextOS)));
       return;
     }
 
     if (request.method === "POST" && pathname === "/api/claims/backfill") {
-      await parseJsonBody(request);
-      sendJson(response, 200, withGraphVersion({
-        status: "not_implemented",
-        message: "Backfill available in Task 6.1",
-      }, resolveGraphVersion(contextOS)));
+      const body = await parseJsonBody(request);
+      const result = contextOS.backfillClaims({
+        limit: parseIntegerParam(body.limit ?? body.batch_size ?? body.batchSize, 100, 1),
+      });
+      sendJson(response, 200, withGraphVersion(result, resolveGraphVersion(contextOS)));
       return;
     }
 
@@ -553,8 +603,24 @@ export async function handleRequest(contextOS, rootDir, request, response) {
           contextOS.reviewMutations({
             action: body.action ?? "list",
             mutationId: body.mutation_id ?? body.mutationId ?? null,
+            mutationIds: body.mutation_ids ?? body.mutationIds ?? null,
             reason: body.reason ?? null,
             actorId: body.actorId ?? "api",
+            filters: {
+              status: body.status ?? null,
+              statuses: body.statuses ?? null,
+              writeClass: body.write_class ?? body.writeClass ?? null,
+              writeClasses: body.write_classes ?? body.writeClasses ?? null,
+              proposalType: body.proposal_type ?? body.proposalType ?? null,
+              proposalTypes: body.proposal_types ?? body.proposalTypes ?? null,
+              triage: body.triage ?? null,
+              includeParked: body.include_parked ?? body.includeParked ?? null,
+              minConfidence: body.min_confidence ?? body.minConfidence ?? null,
+              maxConfidence: body.max_confidence ?? body.maxConfidence ?? null,
+              sourceEventId: body.source_event_id ?? body.sourceEventId ?? null,
+              sort: body.sort ?? null,
+              limit: body.limit ?? null,
+            },
           }),
           resolveGraphVersion(contextOS),
         ),
@@ -663,7 +729,8 @@ export async function handleRequest(contextOS, rootDir, request, response) {
 
     await serveUiAsset(rootDir, pathname, response, resolveGraphVersion(contextOS));
   } catch (error) {
-    sendJson(response, 500, withGraphVersion({
+    const statusCode = Number(error?.statusCode);
+    sendJson(response, Number.isInteger(statusCode) ? statusCode : 500, withGraphVersion({
       error: error.message,
       stack: error.stack,
     }, resolveGraphVersion(contextOS)));

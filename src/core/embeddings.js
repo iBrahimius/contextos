@@ -94,9 +94,10 @@ function truncateForEmbedding(text) {
 }
 
 function runQueued(work) {
-  const job = state.workQueue
-    .catch(() => undefined)
-    .then(work);
+  const job = (async () => {
+    try { await state.workQueue; } catch { /* ignore */ }
+    return work();
+  })();
 
   state.workQueue = job.catch(() => undefined);
   return job;

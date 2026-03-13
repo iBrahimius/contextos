@@ -5,6 +5,7 @@ import {
   computeResolutionKey, computeFacetKey,
   buildClaimFromObservation, resolveSupersession,
   buildClaimResolutionKey, buildClaimFacetKey, dedupeClaimsByFacet,
+  selectPreferredClaimsByResolution, analyzeClaimsTruthSet,
 } from '../src/core/claim-resolution.js';
 
 const baseObservation = {
@@ -24,7 +25,9 @@ const baseObservation = {
 function makeClaim(overrides = {}) {
   const timestamp = overrides.updated_at ?? overrides.created_at ?? '2026-03-07T10:00:00.000Z';
   return {
+    ...overrides,
     id: overrides.id ?? 'claim_new',
+    resolution_key: overrides.resolution_key ?? 'task:ent_1:status',
     facet_key: overrides.facet_key ?? 'status',
     source_type: overrides.source_type ?? 'implicit',
     confidence: overrides.confidence ?? 0.8,
@@ -149,7 +152,61 @@ describe('resolveSupersession', () => {
     assert.deepEqual(resolveSupersession(newer, [existing]), {
       action: 'dispute',
       conflictsWith: 'claim_existing',
+      conflictsWithIds: ['claim_existing'],
     });
+  });
+
+  it('prefers one current path per resolution key even when facet keys differ', () => {
+    const existing = makeClaim({
+      id: 'claim_existing',
+      resolution_key: 'task:ent_1:status',
+      facet_key: 'task|ent_1|status|none|stale',
+      source_type: 'implicit',
+      confidence: 0.7,
+    });
+    const newer = makeClaim({
+      id: 'claim_new',
+      resolution_key: 'task:ent_1:status',
+      facet_key: 'task|ent_1|status|none|fresh',
+      source_type: 'explicit',
+      confidence: 0.9,
+      updated_at: '2026-03-07T11:00:00.000Z',
+    });
+
+    assert.deepEqual(resolveSupersession(newer, [existing]), {
+      action: 'supersede',
+      supersedes: 'claim_existing',
+    });
+  });
+});
+
+describe('selectPreferredClaimsByResolution', () => {
+  it('prefers active claims over superseded or disputed history in current-truth views', () => {
+    const selected = selectPreferredClaimsByResolution([
+      makeClaim({
+        id: 'claim_superseded',
+        resolution_key: 'task:ent_1:status',
+        facet_key: 'task|ent_1|status|none|old',
+        lifecycle_state: 'superseded',
+        confidence: 0.95,
+      }),
+      makeClaim({
+        id: 'claim_disputed',
+        resolution_key: 'task:ent_1:status',
+        facet_key: 'task|ent_1|status|none|conflict',
+        lifecycle_state: 'disputed',
+        confidence: 0.99,
+      }),
+      makeClaim({
+        id: 'claim_active',
+        resolution_key: 'task:ent_1:status',
+        facet_key: 'task|ent_1|status|none|current',
+        lifecycle_state: 'active',
+        confidence: 0.8,
+      }),
+    ]);
+
+    assert.deepEqual(selected.map((claim) => claim.id), ['claim_active']);
   });
 });
 
@@ -363,6 +420,11 @@ describe('ensureClaimForObservation', () => {
       assert.equal(claim.lifecycle_state, 'active');
       assert.equal(claim.supersedes_claim_id, existingClaim.id);
       assert.equal(refreshedExisting?.lifecycle_state, 'superseded');
+      assert.equal(refreshedExisting?.valid_to, claim.valid_from);
+      assert.deepEqual(
+        runtime.db.listClaimsByResolutionKey(claim.resolution_key).map((entry) => entry.id),
+        [claim.id, existingClaim.id],
+      );
     } finally {
       await destroyClaimResolutionDb(runtime);
     }
@@ -395,6 +457,43 @@ describe('ensureClaimForObservation', () => {
 
       assert.equal(claim.lifecycle_state, 'disputed');
       assert.equal(refreshedExisting?.lifecycle_state, 'disputed');
+    } finally {
+      await destroyClaimResolutionDb(runtime);
+    }
+  });
+
+  it('marks contradictory comparable claims disputed instead of superseding them', async () => {
+    const runtime = await makeClaimResolutionDb();
+    const context = seedClaimResolutionData(runtime.db);
+
+    try {
+      const existingClaim = insertClaimResolutionFixture(runtime.db, context, {
+        actor_id: 'user',
+        source_type: 'explicit',
+        confidence: 0.92,
+        predicate: 'provider',
+        object_entity_id: context.ent2.id,
+        value_text: 'Cloudflare',
+        facet_key: `fact|${context.ent1.id}|provider|${context.ent2.id}|cloudflare`,
+        resolution_key: `fact:${context.ent1.id}:provider`,
+      });
+      const alternativeEntity = runtime.db.insertEntity({ label: 'Route53', kind: 'service' });
+      const observation = insertClaimResolutionObservation(runtime.db, context, {
+        actorId: 'user',
+        category: 'fact',
+        predicate: 'provider',
+        subjectEntityId: context.ent1.id,
+        objectEntityId: alternativeEntity.id,
+        detail: 'Route53',
+        confidence: 0.95,
+      });
+      const claim = runtime.ensureClaimForObservation(runtime.db, observation);
+      const refreshedExisting = runtime.db.getClaim(existingClaim.id);
+
+      assert.equal(claim.lifecycle_state, 'disputed');
+      assert.equal(refreshedExisting?.lifecycle_state, 'disputed');
+      assert.equal(claim.supersedes_claim_id, null);
+      assert.equal(refreshedExisting?.superseded_by_claim_id, null);
     } finally {
       await destroyClaimResolutionDb(runtime);
     }
@@ -796,5 +895,114 @@ describe('CLAIM_SOURCE_TYPES set', () => {
 
   it('includes unknown', () => {
     assert.equal(CLAIM_SOURCE_TYPES.has('unknown'), true);
+  });
+});
+
+
+describe('analyzeClaimsTruthSet', () => {
+  it('aggregates independent support without double-counting duplicate evidence', () => {
+    const claims = [
+      makeClaim({
+        id: 'claim_support_1',
+        observation_id: 'obs_same',
+        message_id: 'msg_same',
+        object_entity_id: 'ent_cloudflare',
+        facet_key: 'fact|ent_1|provider|ent_cloudflare|cloudflare',
+        confidence: 0.7,
+      }),
+      makeClaim({
+        id: 'claim_support_2',
+        observation_id: 'obs_same',
+        message_id: 'msg_same',
+        object_entity_id: 'ent_cloudflare',
+        facet_key: 'fact|ent_1|provider|ent_cloudflare|cloudflare',
+        confidence: 0.95,
+      }),
+      makeClaim({
+        id: 'claim_support_3',
+        observation_id: 'obs_other',
+        message_id: 'msg_other',
+        object_entity_id: 'ent_cloudflare',
+        facet_key: 'fact|ent_1|provider|ent_cloudflare|cloudflare',
+        confidence: 0.8,
+      }),
+    ];
+
+    const analysis = analyzeClaimsTruthSet(claims);
+    const truth = analysis.byClaimId.get('claim_support_1');
+
+    assert.equal(truth.support_count, 2);
+    assert.deepEqual(truth.support_keys, ['observation:obs_same', 'observation:obs_other']);
+    assert.equal(truth.aggregated_confidence, 0.99);
+    assert.equal(truth.effective_confidence, 0.99);
+    assert.equal(truth.has_conflict, false);
+  });
+
+  it('detects conflicts only among current comparable variants and keeps superseded rows out of the conflict set', () => {
+    const analysis = analyzeClaimsTruthSet([
+      makeClaim({
+        id: 'claim_cloudflare',
+        object_entity_id: 'ent_cloudflare',
+        facet_key: 'fact|ent_1|provider|ent_cloudflare|cloudflare',
+        confidence: 0.9,
+      }),
+      makeClaim({
+        id: 'claim_route53',
+        object_entity_id: 'ent_route53',
+        facet_key: 'fact|ent_1|provider|ent_route53|route53',
+        confidence: 0.85,
+        lifecycle_state: 'disputed',
+      }),
+      makeClaim({
+        id: 'claim_old',
+        object_entity_id: 'ent_legacy',
+        facet_key: 'fact|ent_1|provider|ent_legacy|legacy',
+        confidence: 0.95,
+        lifecycle_state: 'superseded',
+        superseded_by_claim_id: 'claim_cloudflare',
+      }),
+    ]);
+
+    assert.equal(analysis.conflicts.length, 1);
+    assert.deepEqual(analysis.conflicts[0].claim_ids.sort(), ['claim_cloudflare', 'claim_route53']);
+    assert.equal(analysis.byClaimId.get('claim_cloudflare').has_conflict, true);
+    assert.equal(analysis.byClaimId.get('claim_old').has_conflict, false);
+  });
+
+  it('keeps stale superseded truth visible but out of active truth, with explainability fields intact', () => {
+    const analysis = analyzeClaimsTruthSet([
+      makeClaim({
+        id: 'claim_old',
+        object_entity_id: 'ent_legacy',
+        facet_key: 'fact|ent_1|provider|ent_legacy|legacy',
+        confidence: 0.91,
+        lifecycle_state: 'superseded',
+        superseded_by_claim_id: 'claim_cloudflare',
+      }),
+      makeClaim({
+        id: 'claim_cloudflare',
+        object_entity_id: 'ent_cloudflare',
+        facet_key: 'fact|ent_1|provider|ent_cloudflare|cloudflare',
+        confidence: 0.88,
+        lifecycle_state: 'active',
+      }),
+    ]);
+
+    const stale = analysis.byClaimId.get('claim_old');
+    const fresh = analysis.byClaimId.get('claim_cloudflare');
+
+    assert.equal(analysis.conflicts.length, 0);
+    assert.equal(fresh.is_current, true);
+    assert.equal(fresh.is_superseded, false);
+    assert.deepEqual(fresh.current_claim_ids, ['claim_cloudflare']);
+    assert.deepEqual(fresh.support_claim_ids, ['claim_cloudflare']);
+    assert.equal(fresh.representative_claim_id, 'claim_cloudflare');
+    assert.equal(fresh.effective_confidence, 0.88);
+
+    assert.equal(stale.is_current, false);
+    assert.equal(stale.is_superseded, true);
+    assert.deepEqual(stale.current_claim_ids, []);
+    assert.deepEqual(stale.support_claim_ids, ['claim_old']);
+    assert.equal(stale.has_conflict, false);
   });
 });

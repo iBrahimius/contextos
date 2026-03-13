@@ -132,3 +132,59 @@ test("unused hints decay faster when the graph already covers the path", async (
   const events = contextOS.telemetry.listRecentRetrievalHintEvents(10);
   assert.ok(events.some((event) => event.hint_id === hintId && event.event_type === "decayed"));
 });
+
+test("query seed matching ignores generic question words and favors specific entities", async () => {
+  const rootDir = await makeRoot();
+  const contextOS = new ContextOS({ rootDir });
+
+  contextOS.graph.ensureEntity({ label: "What", kind: "concept" });
+  contextOS.graph.ensureEntity({ label: "hosting", kind: "concept" });
+  const vercel = contextOS.graph.ensureEntity({ label: "Vercel", kind: "vendor" });
+  const rhi = contextOS.graph.ensureEntity({ label: "Rumor Has It", kind: "project" });
+
+  const hostingSeeds = contextOS.retrieval.findSeedEntities("What hosting platform do we use?");
+  assert.deepEqual(hostingSeeds.map((entity) => entity.label), []);
+
+  const brandedSeeds = contextOS.retrieval.findSeedEntities("What is the price of Rumor Has It?");
+  assert.equal(brandedSeeds[0]?.id, rhi.id);
+  assert.ok(!brandedSeeds.some((entity) => entity.label === "What"));
+  assert.ok(!brandedSeeds.some((entity) => entity.id === vercel.id));
+});
+
+test("lexical registry search can surface factual hits without seed entity coverage", async () => {
+  const rootDir = await makeRoot();
+  const contextOS = new ContextOS({ rootDir });
+  const conversation = contextOS.database.createConversation("Registry lexical retrieval");
+  const ledger = contextOS.graph.ensureEntity({ label: "pricing ledger", kind: "system" });
+  const message = contextOS.database.insertMessage({
+    conversationId: conversation.id,
+    role: "user",
+    direction: "inbound",
+    content: "pricing note",
+    tokenCount: 2,
+  });
+  const observation = contextOS.database.insertObservation({
+    messageId: message.id,
+    conversationId: conversation.id,
+    category: "fact",
+    detail: "Pricing note",
+    subjectEntityId: ledger.id,
+    scopeKind: "private",
+  });
+
+  contextOS.database.insertFact({
+    observationId: observation.id,
+    entityId: ledger.id,
+    detail: "RHI pricing remains €34.99 per unit plus shipping.",
+  });
+
+  const result = await contextOS.retrieve({
+    conversationId: conversation.id,
+    queryText: "What is the price of Rumor Has It?",
+  });
+
+  assert.ok(
+    result.items.slice(0, 5).some((item) => item.type === "fact" && item.summary.includes("34.99")),
+    "expected top-5 results to include the pricing fact",
+  );
+});

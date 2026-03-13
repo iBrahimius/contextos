@@ -1,5 +1,72 @@
 import { slugify } from "./utils.js";
 
+const QUERY_STOPWORDS = new Set([
+  "a",
+  "an",
+  "and",
+  "are",
+  "at",
+  "be",
+  "by",
+  "did",
+  "do",
+  "does",
+  "for",
+  "from",
+  "had",
+  "has",
+  "have",
+  "how",
+  "i",
+  "in",
+  "is",
+  "it",
+  "of",
+  "on",
+  "or",
+  "our",
+  "the",
+  "to",
+  "us",
+  "use",
+  "was",
+  "we",
+  "what",
+  "when",
+  "where",
+  "which",
+  "who",
+  "why",
+  "with",
+]);
+const GENERIC_QUERY_ENTITY_LABELS = new Set([
+  "design",
+  "email",
+  "hosting",
+  "marketing",
+  "platform",
+  "price",
+  "provider",
+  "reasoning",
+  "service",
+  "status",
+]);
+
+function tokenizeForQuery(value, { dropStopwords = true } = {}) {
+  return slugify(String(value ?? ""))
+    .split("-")
+    .filter((token) => token.length > 1)
+    .filter((token) => !dropStopwords || !QUERY_STOPWORDS.has(token));
+}
+
+function normalizeForBoundaryMatch(value) {
+  return ` ${String(value ?? "")
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, " ")
+    .replace(/\s+/g, " ")
+    .trim()} `;
+}
+
 function normalizeEntity(row) {
   if (!row) {
     return null;
@@ -177,24 +244,54 @@ export class EntityGraph {
   }
 
   matchQuery(queryText) {
-    const query = queryText.toLowerCase();
+    const queryBoundary = normalizeForBoundaryMatch(queryText);
     const querySlug = slugify(queryText);
-    const queryTokens = querySlug.split("-").filter((token) => token.length > 2);
+    const queryTokens = tokenizeForQuery(queryText);
 
     return this.listEntities()
       .map((entity) => {
-        let score = 0;
-        if (query.includes(entity.label.toLowerCase()) || querySlug.includes(entity.slug)) {
-          score += 3;
+        const labelTokens = tokenizeForQuery(entity.label);
+        if (!labelTokens.length) {
+          return null;
         }
 
-        const labelTokens = entity.slug.split("-");
+        const labelBoundary = normalizeForBoundaryMatch(entity.label);
+        const exactBoundaryMatch = labelBoundary.trim().length > 2 && queryBoundary.includes(labelBoundary);
+        const exactSlugMatch = entity.slug.length > 2 && querySlug.includes(entity.slug);
         const overlap = queryTokens.filter((token) => labelTokens.includes(token)).length;
-        score += overlap;
+        const coverage = overlap / labelTokens.length;
+
+        let score = 0;
+        if (exactBoundaryMatch || exactSlugMatch) {
+          score += 6;
+        }
+
+        if (overlap > 0) {
+          score += overlap * 1.25;
+          score += coverage * 2.5;
+        }
+
+        const singleToken = labelTokens.length === 1;
+        const weakSingleToken = singleToken && overlap === 1 && !(exactBoundaryMatch || exactSlugMatch);
+        const genericSingleTokenExact = singleToken
+          && (exactBoundaryMatch || exactSlugMatch)
+          && GENERIC_QUERY_ENTITY_LABELS.has(labelTokens[0]);
+        const multiTokenCoverageTooLow = !singleToken && overlap > 0 && coverage < 0.5;
+
+        if (weakSingleToken || multiTokenCoverageTooLow) {
+          score *= 0.2;
+        }
+        if (genericSingleTokenExact) {
+          score *= 0.15;
+        }
+
+        if (score < 1.5) {
+          return null;
+        }
 
         return { entity, score };
       })
-      .filter((entry) => entry.score > 0)
+      .filter(Boolean)
       .sort((left, right) => right.score - left.score || right.entity.complexityScore - left.entity.complexityScore);
   }
 

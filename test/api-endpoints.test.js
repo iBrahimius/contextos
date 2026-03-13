@@ -36,6 +36,40 @@ function insertSeedMessage(contextOS, conversationId, {
   });
 }
 
+function seedReviewProposal(contextOS, {
+  messageId,
+  proposalType,
+  detail,
+  confidence,
+  status = "proposed",
+  writeClass = "ai_proposed",
+  createdAt,
+}) {
+  const stored = contextOS.database.insertGraphProposal({
+    conversationId: null,
+    messageId,
+    actorId: "seed",
+    scopeKind: "private",
+    scopeId: null,
+    proposalType,
+    detail,
+    confidence,
+    status,
+    payload: { title: detail, type: proposalType },
+    writeClass,
+  });
+
+  if (createdAt) {
+    contextOS.database.prepare(`
+      UPDATE graph_proposals
+      SET created_at = ?
+      WHERE id = ?
+    `).run(createdAt, stored.id);
+  }
+
+  return contextOS.database.getGraphProposal(stored.id);
+}
+
 function seedApiData(contextOS) {
   const conversation = contextOS.database.createConversation("API Endpoints");
   const beforeMessage = insertSeedMessage(contextOS, conversation.id, {
@@ -324,6 +358,7 @@ test("GET /api/registries/open-items lists active tasks, decisions, and constrai
 
     assert.equal(response.status, 200);
     const payload = await response.json();
+    assert.ok(payload.diagnostics.cache_status.startsWith("miss:"));
     assert.equal(payload.tasks[0].status, "active");
     assert.equal(payload.decisions[0].status, "active");
     assert.equal(payload.constraints[0].status, "active");
@@ -352,6 +387,7 @@ test("POST /api/registries/query filters registry entries", async () => {
 
     assert.equal(response.status, 200);
     const payload = await response.json();
+    assert.ok(payload.diagnostics.cache_status.startsWith("miss:"));
     assert.equal(payload.total, 1);
     assert.equal(payload.results[0].status, "active");
     assert.match(payload.results[0].title, /dns cutover checklist/i);
@@ -399,10 +435,214 @@ test("POST /api/mutations/propose creates a proposed graph proposal", async () =
     const payload = await response.json();
     assert.equal(payload.ok, true);
     assert.equal(payload.status, "proposed");
+    assert.equal(payload.queue_bucket, "actionable");
+    assert.equal(payload.triage, "ai_review");
+    assert.equal(payload.policy_decision, "queue_ai_review");
 
     const stored = harness.contextOS.database.getGraphProposal(payload.proposal_id);
     assert.equal(stored.status, "proposed");
     assert.equal(stored.message_id, harness.seeded.mutationSourceMessage.id);
+  } finally {
+    await harness.close();
+  }
+});
+
+test("POST /api/mutations/propose parks low-confidence ai proposals without auto-applying them", async () => {
+  const harness = await createHarness();
+
+  try {
+    const response = await fetch(`${harness.baseUrl}/api/mutations/propose`, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({
+        type: "add_task",
+        payload: {
+          title: "Weak DNS monitoring suggestion",
+          status: "active",
+        },
+        confidence: 0.3,
+        source_event_id: harness.seeded.mutationSourceMessage.ingestId,
+      }),
+    });
+
+    assert.equal(response.status, 200);
+    const payload = await response.json();
+    assert.equal(payload.ok, true);
+    assert.equal(payload.status, "proposed");
+    assert.equal(payload.write_class, "ai_proposed");
+    assert.equal(payload.queue_bucket, "parked");
+    assert.equal(payload.actionable, false);
+    assert.equal(payload.triage, "parked_backlog");
+    assert.equal(payload.queue_reason, "low_confidence_ai_proposed_parked");
+    assert.equal(payload.policy_decision, "park_low_confidence_ai_proposed");
+
+    const stored = harness.contextOS.database.getGraphProposal(payload.proposal_id);
+    assert.equal(stored.status, "proposed");
+
+    const createdTask = harness.contextOS.database.prepare(`
+      SELECT title
+      FROM tasks
+      WHERE title = ?
+      LIMIT 1
+    `).get("Weak DNS monitoring suggestion");
+    assert.equal(createdTask, undefined);
+  } finally {
+    await harness.close();
+  }
+});
+
+test("POST /api/mutations/review supports deterministic queue filters and summaries", async () => {
+  const harness = await createHarness();
+
+  try {
+    const parked = seedReviewProposal(harness.contextOS, {
+      messageId: harness.seeded.mutationSourceMessage.id,
+      proposalType: "add_task",
+      detail: "Parked weak task",
+      confidence: 0.31,
+      status: "pending",
+      writeClass: "ai_proposed",
+      createdAt: "2026-03-06T13:50:35.000Z",
+    });
+    const oldest = seedReviewProposal(harness.contextOS, {
+      messageId: harness.seeded.mutationSourceMessage.id,
+      proposalType: "add_task",
+      detail: "Old queued task",
+      confidence: 0.61,
+      status: "pending",
+      writeClass: "ai_proposed",
+      createdAt: "2026-03-06T13:50:36.000Z",
+    });
+    const middle = seedReviewProposal(harness.contextOS, {
+      messageId: harness.seeded.mutationSourceMessage.id,
+      proposalType: "add_decision",
+      detail: "Canonical queue item",
+      confidence: 0.93,
+      status: "proposed",
+      writeClass: "canonical",
+      createdAt: "2026-03-06T13:50:37.000Z",
+    });
+    seedReviewProposal(harness.contextOS, {
+      messageId: harness.seeded.mutationSourceMessage.id,
+      proposalType: "add_constraint",
+      detail: "Already reviewed item",
+      confidence: 0.4,
+      status: "rejected",
+      writeClass: "canonical",
+      createdAt: "2026-03-06T13:50:38.000Z",
+    });
+    const newest = seedReviewProposal(harness.contextOS, {
+      messageId: harness.seeded.mutationSourceMessage.id,
+      proposalType: "add_task",
+      detail: "Newest queued task",
+      confidence: 0.88,
+      status: "proposed",
+      writeClass: "ai_proposed",
+      createdAt: "2026-03-06T13:50:39.000Z",
+    });
+
+    const listResponse = await fetch(`${harness.baseUrl}/api/mutations/review`, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ action: "list" }),
+    });
+    assert.equal(listResponse.status, 200);
+    const listed = await listResponse.json();
+    assert.equal(listed.total, 3);
+    assert.equal(listed.returned, 3);
+    assert.deepEqual(listed.summary.by_status, { proposed: 2, pending: 1 });
+    assert.deepEqual(listed.summary.by_write_class, { ai_proposed: 2, canonical: 1 });
+    assert.deepEqual(listed.summary.by_triage, { ai_review: 2, human_canonical: 1 });
+    assert.deepEqual(listed.summary.by_queue_bucket, { actionable: 3 });
+    assert.deepEqual(listed.summary.by_policy_decision, {
+      queue_ai_review: 2,
+      queue_canonical_review: 1,
+    });
+    assert.equal(listed.summary.queue_total, 3);
+    assert.equal(listed.summary.parked_total, 1);
+    assert.equal(listed.applied_filters.include_parked, false);
+    assert.equal(listed.mutations[0].mutation_id, newest.id);
+    assert.equal(listed.mutations[2].mutation_id, oldest.id);
+    assert.ok(listed.mutations.every((mutation) => mutation.queue_bucket === "actionable"));
+
+    const parkedResponse = await fetch(`${harness.baseUrl}/api/mutations/review`, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({
+        action: "list",
+        triage: "parked_backlog",
+      }),
+    });
+    assert.equal(parkedResponse.status, 200);
+    const parkedList = await parkedResponse.json();
+    assert.equal(parkedList.total, 1);
+    assert.equal(parkedList.returned, 1);
+    assert.equal(parkedList.applied_filters.include_parked, true);
+    assert.equal(parkedList.mutations[0].mutation_id, parked.id);
+    assert.equal(parkedList.mutations[0].queue_bucket, "parked");
+    assert.equal(parkedList.mutations[0].policy_decision, "park_low_confidence_ai_proposed");
+    assert.deepEqual(parkedList.summary.by_triage, { parked_backlog: 1 });
+    assert.deepEqual(parkedList.summary.by_queue_bucket, { parked: 1 });
+
+    const canonicalResponse = await fetch(`${harness.baseUrl}/api/mutations/review`, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({
+        action: "list",
+        write_class: "canonical",
+      }),
+    });
+    assert.equal(canonicalResponse.status, 200);
+    const canonicalList = await canonicalResponse.json();
+    assert.equal(canonicalList.total, 1);
+    assert.equal(canonicalList.mutations[0].mutation_id, middle.id);
+    assert.deepEqual(canonicalList.summary.by_write_class, { canonical: 1 });
+
+    const decisionResponse = await fetch(`${harness.baseUrl}/api/mutations/review`, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({
+        action: "list",
+        proposal_type: "add_decision",
+      }),
+    });
+    assert.equal(decisionResponse.status, 200);
+    const decisionList = await decisionResponse.json();
+    assert.equal(decisionList.total, 1);
+    assert.equal(decisionList.mutations[0].mutation_id, middle.id);
+
+    const confidenceResponse = await fetch(`${harness.baseUrl}/api/mutations/review`, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({
+        action: "list",
+        min_confidence: 0.9,
+      }),
+    });
+    assert.equal(confidenceResponse.status, 200);
+    const confidenceList = await confidenceResponse.json();
+    assert.equal(confidenceList.total, 1);
+    assert.equal(confidenceList.mutations[0].mutation_id, middle.id);
+
+    const oldestResponse = await fetch(`${harness.baseUrl}/api/mutations/review`, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({
+        action: "list",
+        sort: "oldest",
+        limit: 2,
+      }),
+    });
+    assert.equal(oldestResponse.status, 200);
+    const oldestList = await oldestResponse.json();
+    assert.equal(oldestList.total, 3);
+    assert.equal(oldestList.returned, 2);
+    assert.deepEqual(
+      oldestList.mutations.map((mutation) => mutation.mutation_id),
+      [oldest.id, middle.id],
+    );
+    assert.equal(oldestList.applied_filters.sort, "oldest");
+    assert.equal(oldestList.applied_filters.limit, 2);
   } finally {
     await harness.close();
   }
@@ -494,6 +734,241 @@ test("POST /api/mutations/review lists, applies, and rejects proposals", async (
   }
 });
 
+
+test("POST /api/mutations/review supports explicit-id batch apply and reject with audit fields", async () => {
+  const harness = await createHarness();
+
+  try {
+    const applyFirst = await fetch(`${harness.baseUrl}/api/mutations/propose`, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({
+        type: "add_task",
+        payload: {
+          title: "Batch apply DNS monitoring alert",
+          entity: "DNS",
+          status: "active",
+        },
+        confidence: 0.82,
+        source_event_id: harness.seeded.mutationSourceMessage.ingestId,
+      }),
+    }).then((response) => response.json());
+
+    const applySecond = await fetch(`${harness.baseUrl}/api/mutations/propose`, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({
+        type: "add_constraint",
+        payload: {
+          title: "Batch apply keep DNS rollbacks ready",
+          entity: "DNS",
+          severity: "medium",
+        },
+        confidence: 0.77,
+        source_event_id: harness.seeded.mutationSourceMessage.ingestId,
+      }),
+    }).then((response) => response.json());
+
+    const applyResponse = await fetch(`${harness.baseUrl}/api/mutations/review`, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({
+        action: "apply_batch",
+        mutation_ids: [applyFirst.proposal_id, applySecond.proposal_id],
+        reason: "Batch approved",
+      }),
+    });
+    assert.equal(applyResponse.status, 200);
+    const applied = await applyResponse.json();
+    assert.equal(applied.ok, true);
+    assert.equal(applied.status, "accepted");
+    assert.equal(applied.count, 2);
+    assert.deepEqual(applied.mutation_ids, [applyFirst.proposal_id, applySecond.proposal_id]);
+    assert.deepEqual(
+      applied.results.map((result) => result.mutation_id),
+      [applyFirst.proposal_id, applySecond.proposal_id],
+    );
+    assert.ok(applied.results.every((result) => result.reviewed_by_actor === "api"));
+    assert.ok(applied.results.every((result) => result.reason === "Batch approved"));
+    assert.ok(applied.mutations.every((mutation) => mutation.status === "accepted"));
+    assert.ok(applied.mutations.every((mutation) => mutation.reviewed_by_actor === "api"));
+    assert.ok(applied.mutations.every((mutation) => mutation.reason === "Batch approved"));
+
+    const appliedTask = harness.contextOS.database.prepare(`
+      SELECT title
+      FROM tasks
+      WHERE title = ?
+      LIMIT 1
+    `).get("Batch apply DNS monitoring alert");
+    assert.ok(appliedTask);
+
+    const appliedConstraint = harness.contextOS.database.prepare(`
+      SELECT detail
+      FROM constraints
+      WHERE detail = ?
+      LIMIT 1
+    `).get("Batch apply keep DNS rollbacks ready");
+    assert.ok(appliedConstraint);
+
+    const rejectFirst = await fetch(`${harness.baseUrl}/api/mutations/propose`, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({
+        type: "add_task",
+        payload: {
+          title: "Batch reject duplicate DNS task",
+          status: "active",
+        },
+        confidence: 0.63,
+        source_event_id: harness.seeded.mutationSourceMessage.ingestId,
+      }),
+    }).then((response) => response.json());
+
+    const rejectSecond = await fetch(`${harness.baseUrl}/api/mutations/propose`, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({
+        type: "add_decision",
+        payload: {
+          title: "Batch reject redundant DNS decision",
+        },
+        confidence: 0.58,
+        source_event_id: harness.seeded.mutationSourceMessage.ingestId,
+      }),
+    }).then((response) => response.json());
+
+    const rejectResponse = await fetch(`${harness.baseUrl}/api/mutations/review`, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({
+        action: "reject_batch",
+        mutation_ids: [rejectFirst.proposal_id, rejectSecond.proposal_id],
+        reason: "Duplicate backlog items",
+      }),
+    });
+    assert.equal(rejectResponse.status, 200);
+    const rejected = await rejectResponse.json();
+    assert.equal(rejected.ok, true);
+    assert.equal(rejected.status, "rejected");
+    assert.equal(rejected.count, 2);
+    assert.ok(rejected.results.every((result) => result.status === "rejected"));
+    assert.ok(rejected.results.every((result) => result.reviewed_by_actor === "api"));
+    assert.ok(rejected.results.every((result) => result.reason === "Duplicate backlog items"));
+    assert.ok(rejected.mutations.every((mutation) => mutation.status === "rejected"));
+    assert.ok(rejected.mutations.every((mutation) => mutation.reason === "Duplicate backlog items"));
+
+    const rejectedFirstProposal = harness.contextOS.database.getGraphProposal(rejectFirst.proposal_id);
+    const rejectedSecondProposal = harness.contextOS.database.getGraphProposal(rejectSecond.proposal_id);
+    assert.equal(rejectedFirstProposal.status, "rejected");
+    assert.equal(rejectedSecondProposal.status, "rejected");
+    assert.equal(rejectedFirstProposal.reviewed_by_actor, "api");
+    assert.equal(rejectedSecondProposal.reviewed_by_actor, "api");
+    assert.equal(rejectedFirstProposal.reason, "Duplicate backlog items");
+    assert.equal(rejectedSecondProposal.reason, "Duplicate backlog items");
+  } finally {
+    await harness.close();
+  }
+});
+
+test("POST /api/mutations/review rejects unsafe explicit-id batch payloads deterministically", async () => {
+  const harness = await createHarness();
+
+  try {
+    const firstProposal = await fetch(`${harness.baseUrl}/api/mutations/propose`, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({
+        type: "add_task",
+        payload: {
+          title: "Validation batch task one",
+          status: "active",
+        },
+        confidence: 0.74,
+        source_event_id: harness.seeded.mutationSourceMessage.ingestId,
+      }),
+    }).then((response) => response.json());
+
+    const secondProposal = await fetch(`${harness.baseUrl}/api/mutations/propose`, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({
+        type: "add_task",
+        payload: {
+          title: "Validation batch task two",
+          status: "active",
+        },
+        confidence: 0.71,
+        source_event_id: harness.seeded.mutationSourceMessage.ingestId,
+      }),
+    }).then((response) => response.json());
+
+    const assertRejected = async (body, expectedMessage) => {
+      const response = await fetch(`${harness.baseUrl}/api/mutations/review`, {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify(body),
+      });
+
+      assert.equal(response.status, 400);
+      const payload = await response.json();
+      assert.match(payload.error, expectedMessage);
+      return payload;
+    };
+
+    await assertRejected({
+      action: "apply_batch",
+    }, /mutation_ids must be an array/i);
+
+    await assertRejected({
+      action: "apply_batch",
+      mutation_ids: [],
+    }, /mutation_ids must contain at least one id/i);
+
+    await assertRejected({
+      action: "apply_batch",
+      mutation_ids: [firstProposal.proposal_id, firstProposal.proposal_id],
+    }, /contains duplicates/i);
+
+    await assertRejected({
+      action: "apply_batch",
+      mutation_ids: [firstProposal.proposal_id, "gp_missing"],
+    }, /unknown mutation_ids/i);
+
+    const acceptedResponse = await fetch(`${harness.baseUrl}/api/mutations/review`, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({
+        action: "apply",
+        mutation_id: secondProposal.proposal_id,
+      }),
+    });
+    assert.equal(acceptedResponse.status, 200);
+
+    await assertRejected({
+      action: "reject_batch",
+      mutation_ids: [secondProposal.proposal_id],
+      reason: "Too late",
+    }, /already reviewed mutation_ids/i);
+
+    await assertRejected({
+      action: "apply_batch",
+      mutation_id: firstProposal.proposal_id,
+      mutation_ids: [firstProposal.proposal_id],
+    }, /ambiguous review payload/i);
+
+    await assertRejected({
+      action: "apply",
+      mutation_id: firstProposal.proposal_id,
+      mutation_ids: [firstProposal.proposal_id],
+    }, /ambiguous review payload/i);
+
+    const untouchedProposal = harness.contextOS.database.getGraphProposal(firstProposal.proposal_id);
+    assert.equal(untouchedProposal.status, "proposed");
+  } finally {
+    await harness.close();
+  }
+});
+
 test("GET /api/status and /api/health expose registry and observation counts", async () => {
   const harness = await createHarness();
 
@@ -530,6 +1005,16 @@ test("GET /api/status and /api/health expose registry and observation counts", a
       },
       coverage_ratio: 0.75,
       disputed_count: 1,
+      backfill: {
+        total_observations: 4,
+        not_yet_processed: 1,
+        processed_with_claims: 3,
+        processed_with_no_claim: 0,
+        failed: 0,
+        processed: 3,
+        remaining: 1,
+        completion_ratio: 0.75,
+      },
     });
 
     const healthResponse = await fetch(`${harness.baseUrl}/api/health`);

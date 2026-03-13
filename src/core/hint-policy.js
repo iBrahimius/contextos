@@ -3,9 +3,12 @@ function clamp(value, minimum, maximum) {
 }
 
 function normalizeScoreMass(results) {
-  const total = results
-    .slice(0, 8)
-    .reduce((sum, result) => sum + clamp(Number(result.graphScore ?? result.score ?? 0) / 2.5, 0, 1), 0);
+  const scores = results.slice(0, 8).map((r) => Number(r.graphScore ?? r.score ?? 0));
+  if (scores.length === 0) return 0;
+  // Adaptive normalization: detect RRF-scale scores (typically < 0.1) vs legacy scores (0-3.0)
+  const maxScore = Math.max(...scores);
+  const divisor = maxScore < 0.15 ? 0.05 : 2.5;
+  const total = scores.reduce((sum, s) => sum + clamp(s / divisor, 0, 1), 0);
   return clamp(total / 4, 0, 1.5);
 }
 
@@ -70,7 +73,7 @@ export function scoreHintOutcome({
     netReward,
     nextWeight: Number(nextWeight.toFixed(3)),
     nextTtlTurns,
-    rewarded: netReward > 0.08,
+    rewarded: netReward > 0.02,
     decayed: penalty > 0.12,
     metrics: {
       attributedItemCount,

@@ -4,6 +4,8 @@ import { DatabaseSync } from "node:sqlite";
 
 import { SCHEMA } from "./schema.js";
 import { paginateResults, paginationClause } from "../core/pagination.js";
+import { validateLifecycleTransition } from "../core/claim-resolution.js";
+import { isValidLifecycleState } from "../core/claim-types.js";
 import { createId, nowIso, parseJson, slugify, stableJson } from "../core/utils.js";
 
 const SCOPE_ORDER = ["private", "project", "shared", "public"];
@@ -142,6 +144,50 @@ function resolveScopeAndPagination(scopeFilterOrOptions = null, maybeOptions = n
 function likeSearchTerm(query) {
   const normalized = String(query ?? "").trim().toLowerCase();
   return normalized ? `%${normalized}%` : null;
+}
+
+function normalizeImportanceValue(value) {
+  if (value === null || value === undefined) {
+    return 1.0;
+  }
+
+  const numeric = Number(value);
+  return Number.isFinite(numeric) ? numeric : 1.0;
+}
+
+function normalizeLifecycleStateWrite({ currentClaim = null, nextState, supersededByClaimId = undefined }) {
+  const normalizedState = typeof nextState === "string" ? nextState.trim() : nextState;
+  if (!normalizedState) {
+    return currentClaim?.lifecycle_state ?? "candidate";
+  }
+
+  if (!isValidLifecycleState(normalizedState)) {
+    throw new Error(`Invalid claim lifecycle state: ${normalizedState}`);
+  }
+
+  const effectiveSupersededByClaimId = supersededByClaimId === undefined
+    ? (currentClaim?.superseded_by_claim_id ?? null)
+    : supersededByClaimId;
+
+  if (normalizedState === "active" && effectiveSupersededByClaimId) {
+    return "superseded";
+  }
+
+  const currentState = currentClaim?.lifecycle_state ?? null;
+  if (currentState && !validateLifecycleTransition(currentState, normalizedState)) {
+    throw new Error(`Invalid claim lifecycle transition: ${currentState} -> ${normalizedState}`);
+  }
+
+  return normalizedState;
+}
+
+function normalizeBackfillStatus(value) {
+  const normalized = String(value ?? "").trim();
+  if (["claim_created", "no_claim", "failed"].includes(normalized)) {
+    return normalized;
+  }
+
+  throw new Error(`Invalid claim backfill status: ${value}`);
 }
 
 function isDateOnly(value) {
@@ -348,6 +394,24 @@ export class ContextDatabase {
     this.dbPath = dbPath;
     fs.mkdirSync(path.dirname(dbPath), { recursive: true });
     this.sqlite = new DatabaseSync(dbPath);
+
+    // Enable WAL mode for concurrent reads, better write performance, and crash resilience.
+    // PRAGMA journal_mode is persistent — only needs to be set once per database file,
+    // but re-issuing is a no-op if already WAL.
+    this.sqlite.exec("PRAGMA journal_mode = WAL");
+    this.sqlite.exec("PRAGMA busy_timeout = 5000");
+
+    // Snapshot the DB file's inode at open time for WAL integrity checks.
+    // If the inode changes later, someone replaced/deleted the file while we had it open.
+    try {
+      const stat = fs.statSync(dbPath);
+      this._openIno = stat.ino;
+      this._openDev = stat.dev;
+    } catch {
+      this._openIno = null;
+      this._openDev = null;
+    }
+
     this.applyTableMigrations();
     this.sqlite.exec(SCHEMA);
     this.statements = new Map();
@@ -1024,6 +1088,42 @@ export class ContextDatabase {
       .filter((row) => row.embedding);
   }
 
+  /**
+   * Check WAL file integrity: verify the DB file, WAL, and SHM are still
+   * linked on disk and the inode hasn't changed since we opened the connection.
+   *
+   * Returns { ok: true } when healthy, or { ok: false, warnings: [...] }
+   * when files are missing/replaced — indicating potential data loss risk.
+   */
+  checkWalIntegrity() {
+    const warnings = [];
+    const dbExists = fs.existsSync(this.dbPath);
+    const walExists = fs.existsSync(this.dbPath + "-wal");
+    const shmExists = fs.existsSync(this.dbPath + "-shm");
+
+    if (!dbExists) warnings.push("DB file missing from disk — process may be using deleted inode");
+    if (!walExists) warnings.push("WAL file missing — writes may not be durable");
+    if (!shmExists) warnings.push("SHM file missing — shared memory index unavailable");
+
+    // Check if the DB file's inode changed (replaced by another file)
+    if (dbExists && this._openIno != null) {
+      try {
+        const stat = fs.statSync(this.dbPath);
+        if (stat.ino !== this._openIno || stat.dev !== this._openDev) {
+          warnings.push(
+            `DB file inode changed (opened: ${this._openIno}, current: ${stat.ino}) — file was replaced while process was running`
+          );
+        }
+      } catch (e) {
+        warnings.push(`Cannot stat DB file: ${e.message}`);
+      }
+    }
+
+    return warnings.length === 0
+      ? { ok: true }
+      : { ok: false, warnings };
+  }
+
   getEmbeddingCoverage() {
     const row = this.prepare(`
       SELECT
@@ -1606,6 +1706,41 @@ export class ContextDatabase {
     return { id, createdAt, scopeKind, scopeId, graphVersion };
   }
 
+  getObservation(observationId) {
+    return this.prepare(`
+      SELECT
+        o.id,
+        o.conversation_id AS conversationId,
+        o.message_id AS messageId,
+        o.actor_id AS actorId,
+        o.category,
+        o.predicate,
+        o.subject_entity_id AS subject_entity_id,
+        o.object_entity_id AS object_entity_id,
+        o.detail,
+        o.confidence,
+        o.source_span AS sourceSpan,
+        o.metadata_json AS metadataJson,
+        o.scope_kind AS scope_kind,
+        o.scope_id AS scope_id,
+        o.created_at AS created_at,
+        o.compressed_into AS compressedInto,
+        subject.label AS subjectLabel,
+        object.label AS objectLabel,
+        m.role AS message_role,
+        m.content AS message_content,
+        m.captured_at AS message_captured_at,
+        m.ingest_id AS message_ingest_id,
+        m.origin_kind AS origin_kind
+      FROM observations o
+      JOIN messages m ON m.id = o.message_id
+      LEFT JOIN entities subject ON subject.id = o.subject_entity_id
+      LEFT JOIN entities object ON object.id = o.object_entity_id
+      WHERE o.id = ?
+      LIMIT 1
+    `).get(observationId) ?? null;
+  }
+
   insertTask({ observationId, entityId, title, status = "open", priority = "medium" }) {
     const id = createId("task");
     this.prepare(`
@@ -1649,6 +1784,13 @@ export class ContextDatabase {
     const metadataJson = typeof metadataValue === "string" ? metadataValue : stableJson(metadataValue);
     const createdAt = claim.created_at ?? claim.createdAt ?? timestamp;
     const updatedAt = claim.updated_at ?? claim.updatedAt ?? createdAt;
+    const supersededByClaimId = claim.superseded_by_claim_id ?? claim.supersededByClaimId ?? null;
+    const lifecycleState = normalizeLifecycleStateWrite({
+      currentClaim: null,
+      nextState: claim.lifecycle_state ?? claim.lifecycleState ?? "candidate",
+      supersededByClaimId,
+    });
+    const validTo = claim.valid_to ?? claim.validTo ?? (lifecycleState === "superseded" ? updatedAt : null);
 
     this.prepare(`
       INSERT INTO claims (
@@ -1656,9 +1798,9 @@ export class ContextDatabase {
         subject_entity_id, predicate, object_entity_id, value_text, confidence,
         source_type, lifecycle_state, valid_from, valid_to, resolution_key, facet_key,
         supersedes_claim_id, superseded_by_claim_id, scope_kind, scope_id,
-        metadata_json, created_at, updated_at
+        metadata_json, created_at, updated_at, importance_score
       )
-      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
     `).run(
       id,
       claim.observation_id ?? claim.observationId ?? null,
@@ -1672,18 +1814,19 @@ export class ContextDatabase {
       claim.value_text ?? claim.valueText ?? null,
       claim.confidence ?? 0.5,
       claim.source_type ?? claim.sourceType ?? "implicit",
-      claim.lifecycle_state ?? claim.lifecycleState ?? "candidate",
+      lifecycleState,
       claim.valid_from ?? claim.validFrom ?? timestamp,
-      claim.valid_to ?? claim.validTo ?? null,
+      validTo,
       claim.resolution_key ?? claim.resolutionKey ?? null,
       claim.facet_key ?? claim.facetKey ?? null,
       claim.supersedes_claim_id ?? claim.supersedesClaimId ?? null,
-      claim.superseded_by_claim_id ?? claim.supersededByClaimId ?? null,
+      supersededByClaimId,
       claim.scope_kind ?? claim.scopeKind ?? "private",
       claim.scope_id ?? claim.scopeId ?? null,
       metadataJson,
       createdAt,
       updatedAt,
+      normalizeImportanceValue(claim.importance_score ?? claim.importanceScore),
     );
 
     return this.getClaim(id);
@@ -1723,6 +1866,51 @@ export class ContextDatabase {
     `).get(observationId) ?? null;
   }
 
+  getObservationImportanceScore(observationId) {
+    const normalizedObservationId = String(observationId ?? "").trim();
+    if (!normalizedObservationId) {
+      return 1.0;
+    }
+
+    const directClaim = this.getClaimByObservationId(normalizedObservationId);
+    if (directClaim) {
+      return normalizeImportanceValue(directClaim.importance_score);
+    }
+
+    const observation = this.prepare(`
+      SELECT
+        subject_entity_id AS subjectEntityId,
+        object_entity_id AS objectEntityId
+      FROM observations
+      WHERE id = ?
+      LIMIT 1
+    `).get(normalizedObservationId);
+
+    const entityIds = [...new Set([
+      observation?.subjectEntityId ?? null,
+      observation?.objectEntityId ?? null,
+    ].map((value) => String(value ?? "").trim()).filter(Boolean))];
+
+    if (!entityIds.length) {
+      return 1.0;
+    }
+
+    const placeholders = entityIds.map(() => "?").join(", ");
+    const row = this.prepare(`
+      SELECT importance_score
+      FROM claims
+      WHERE lifecycle_state = 'active'
+        AND (
+          subject_entity_id IN (${placeholders})
+          OR object_entity_id IN (${placeholders})
+        )
+      ORDER BY importance_score DESC, updated_at DESC
+      LIMIT 1
+    `).get(...entityIds, ...entityIds);
+
+    return normalizeImportanceValue(row?.importance_score);
+  }
+
   listClaimsByObservationIds(observationIds, scopeFilter = null) {
     const normalizedObservationIds = Array.isArray(observationIds)
       ? observationIds.map((value) => String(value ?? "").trim()).filter(Boolean)
@@ -1752,6 +1940,7 @@ export class ContextDatabase {
       : [];
     const clauses = [
       "lifecycle_state = ?",
+      "superseded_by_claim_id IS NULL",
       "valid_from <= ?",
       "(valid_to IS NULL OR valid_to > ?)",
     ];
@@ -1852,7 +2041,7 @@ export class ContextDatabase {
       SELECT *
       FROM claims
       WHERE resolution_key = ?
-      ORDER BY created_at DESC
+      ORDER BY created_at DESC, id DESC
     `).all(resolutionKey);
   }
 
@@ -1921,6 +2110,11 @@ export class ContextDatabase {
   }
 
   updateClaim(id, fields) {
+    const existing = this.getClaim(id);
+    if (!existing) {
+      return null;
+    }
+
     const allowedColumns = new Map([
       ["value_text", "value_text"],
       ["valueText", "value_text"],
@@ -1934,9 +2128,10 @@ export class ContextDatabase {
       ["supersededByClaimId", "superseded_by_claim_id"],
       ["metadata_json", "metadata_json"],
       ["metadataJson", "metadata_json"],
+      ["importance_score", "importance_score"],
+      ["importanceScore", "importance_score"],
     ]);
-    const updates = [];
-    const params = [];
+    const pendingValues = new Map();
 
     for (const [key, value] of Object.entries(fields ?? {})) {
       const column = allowedColumns.get(key);
@@ -1946,9 +2141,39 @@ export class ContextDatabase {
 
       const resolvedValue = column === "metadata_json" && typeof value !== "string"
         ? stableJson(value)
-        : value;
+        : column === "importance_score"
+          ? normalizeImportanceValue(value)
+          : value;
+      pendingValues.set(column, resolvedValue);
+    }
+
+    if (pendingValues.has("lifecycle_state") || pendingValues.has("superseded_by_claim_id")) {
+      const lifecycleState = normalizeLifecycleStateWrite({
+        currentClaim: existing,
+        nextState: pendingValues.has("lifecycle_state")
+          ? pendingValues.get("lifecycle_state")
+          : existing.lifecycle_state,
+        supersededByClaimId: pendingValues.has("superseded_by_claim_id")
+          ? pendingValues.get("superseded_by_claim_id")
+          : existing.superseded_by_claim_id,
+      });
+      pendingValues.set("lifecycle_state", lifecycleState);
+
+      if (lifecycleState === "superseded") {
+        const existingValidTo = pendingValues.has("valid_to") ? pendingValues.get("valid_to") : existing.valid_to;
+        pendingValues.set("valid_to", existingValidTo ?? nowIso());
+      }
+
+      if (lifecycleState === "active" && pendingValues.has("valid_to")) {
+        pendingValues.set("valid_to", null);
+      }
+    }
+
+    const updates = [];
+    const params = [];
+    for (const [column, value] of pendingValues.entries()) {
       updates.push(`${column} = ?`);
-      params.push(resolvedValue);
+      params.push(value);
     }
 
     updates.push("updated_at = ?");
@@ -2002,6 +2227,129 @@ export class ContextDatabase {
         ? Number((observationsWithClaims / totalObservations).toFixed(4))
         : 0,
     };
+  }
+
+  getClaimBackfillCoverage() {
+    const row = this.prepare(`
+      SELECT
+        (SELECT COUNT(*) FROM observations) AS total_observations,
+        (SELECT COUNT(DISTINCT observation_id)
+         FROM claims
+         WHERE observation_id IS NOT NULL) AS observations_with_claims,
+        (SELECT COUNT(*)
+         FROM claim_backfill_status
+         WHERE status = 'no_claim') AS observations_with_no_claim,
+        (SELECT COUNT(*)
+         FROM claim_backfill_status
+         WHERE status = 'failed') AS failed_observations
+    `).get();
+
+    const totalObservations = Number(row?.total_observations ?? 0);
+    const withClaims = Number(row?.observations_with_claims ?? 0);
+    const noClaim = Number(row?.observations_with_no_claim ?? 0);
+    const failed = Number(row?.failed_observations ?? 0);
+    const processed = withClaims + noClaim + failed;
+    const notYetProcessed = Math.max(0, totalObservations - processed);
+
+    return {
+      total_observations: totalObservations,
+      not_yet_processed: notYetProcessed,
+      processed_with_claims: withClaims,
+      processed_with_no_claim: noClaim,
+      failed,
+      processed,
+      remaining: notYetProcessed,
+      completion_ratio: totalObservations > 0
+        ? Number((processed / totalObservations).toFixed(4))
+        : 0,
+    };
+  }
+
+  listObservationsForClaimBackfill(limit = null) {
+    const numericLimit = Number(limit);
+    const normalizedLimit = Number.isFinite(numericLimit) && numericLimit > 0
+      ? Math.trunc(numericLimit)
+      : null;
+    const params = normalizedLimit === null ? [] : [normalizedLimit];
+    const limitClause = normalizedLimit === null ? "" : "\n      LIMIT ?";
+
+    return this.prepare(`
+      SELECT
+        o.id,
+        o.conversation_id AS conversation_id,
+        o.message_id AS message_id,
+        o.actor_id AS actor_id,
+        o.category,
+        o.predicate,
+        o.subject_entity_id AS subject_entity_id,
+        o.object_entity_id AS object_entity_id,
+        o.detail,
+        o.confidence,
+        o.scope_kind AS scope_kind,
+        o.scope_id AS scope_id,
+        o.metadata_json AS metadata_json,
+        o.created_at AS created_at,
+        m.origin_kind AS origin_kind,
+        c.id AS claim_id,
+        c.lifecycle_state AS claim_lifecycle_state,
+        bs.status AS backfill_status
+      FROM observations o
+      JOIN messages m ON m.id = o.message_id
+      LEFT JOIN claims c ON c.observation_id = o.id
+      LEFT JOIN claim_backfill_status bs ON bs.observation_id = o.id
+      WHERE c.id IS NULL
+        AND (bs.status IS NULL OR bs.status = 'failed')
+      ORDER BY o.created_at ASC, o.id ASC${limitClause}
+    `).all(...params);
+  }
+
+  getClaimBackfillStatus(observationId) {
+    return this.prepare(`
+      SELECT *
+      FROM claim_backfill_status
+      WHERE observation_id = ?
+      LIMIT 1
+    `).get(observationId) ?? null;
+  }
+
+  upsertClaimBackfillStatus({ observationId, status, claimId = null, errorMessage = null }) {
+    const normalizedStatus = normalizeBackfillStatus(status);
+    const timestamp = nowIso();
+
+    this.prepare(`
+      INSERT INTO claim_backfill_status (
+        observation_id,
+        status,
+        claim_id,
+        error_message,
+        attempts,
+        first_attempted_at,
+        last_attempted_at,
+        processed_at,
+        updated_at
+      )
+      VALUES (?, ?, ?, ?, 1, ?, ?, ?, ?)
+      ON CONFLICT(observation_id) DO UPDATE SET
+        status = excluded.status,
+        claim_id = excluded.claim_id,
+        error_message = excluded.error_message,
+        attempts = claim_backfill_status.attempts + 1,
+        first_attempted_at = COALESCE(claim_backfill_status.first_attempted_at, excluded.first_attempted_at),
+        last_attempted_at = excluded.last_attempted_at,
+        processed_at = excluded.processed_at,
+        updated_at = excluded.updated_at
+    `).run(
+      observationId,
+      normalizedStatus,
+      claimId,
+      errorMessage,
+      timestamp,
+      timestamp,
+      normalizedStatus === "failed" ? null : timestamp,
+      timestamp,
+    );
+
+    return this.getClaimBackfillStatus(observationId);
   }
 
   /**
@@ -2544,6 +2892,58 @@ export class ContextDatabase {
       .filter((row) => scopeMatches(row, scopeFilter, "private"));
   }
 
+  listClaimsForEntities(entityIds, scopeFilter = null, { states = ['active', 'candidate'], types = null, limit = 100 } = {}) {
+    if (!entityIds.length) {
+      return [];
+    }
+
+    const normalizedStates = Array.isArray(states)
+      ? states.map((value) => String(value ?? "").trim()).filter(Boolean)
+      : ['active', 'candidate'];
+    const normalizedTypes = Array.isArray(types)
+      ? types.map((value) => String(value ?? "").trim()).filter(Boolean)
+      : [];
+    const normalizedLimit = clampLimit(limit, 100);
+    const placeholders = entityIds.map(() => "?").join(", ");
+
+    const clauses = [
+      `(c.subject_entity_id IN (${placeholders}) OR c.object_entity_id IN (${placeholders}))`,
+      `c.lifecycle_state IN (${normalizedStates.map(() => "?").join(", ")})`,
+    ];
+    const params = [...entityIds, ...entityIds, ...normalizedStates];
+
+    // For candidate claims, require confidence >= 0.7
+    clauses.push(`(c.lifecycle_state = 'active' OR c.confidence >= 0.7)`);
+
+    if (normalizedTypes.length) {
+      clauses.push(`c.claim_type IN (${normalizedTypes.map(() => "?").join(", ")})`);
+      params.push(...normalizedTypes);
+    }
+
+    const whereClause = clauses.length ? `WHERE ${clauses.join(" AND ")}` : "";
+
+    const rows = this.prepare(`
+      SELECT
+        c.*,
+        se.label AS subjectLabel,
+        oe.label AS objectLabel,
+        c.importance_score,
+        c.confidence,
+        c.lifecycle_state,
+        c.created_at
+      FROM claims c
+      LEFT JOIN entities se ON se.id = c.subject_entity_id
+      LEFT JOIN entities oe ON oe.id = c.object_entity_id
+      ${whereClause}
+      ORDER BY c.importance_score DESC, c.created_at DESC
+      LIMIT ?
+    `)
+      .all(...params, normalizedLimit)
+      .filter((row) => scopeMatches(row, scopeFilter, "private"));
+
+    return rows;
+  }
+
   upsertDocument({ filePath, checksum, metadata = null }) {
     const existing = this.prepare(`
       SELECT *
@@ -2818,29 +3218,121 @@ export class ContextDatabase {
     `).get(id);
   }
 
-  listGraphProposals({ status = null, statuses = null, limit = 100 } = {}) {
-    const normalizedStatuses = Array.isArray(statuses)
-      ? statuses.map((value) => String(value ?? "").trim()).filter(Boolean)
+  getGraphProposalsByIds(ids = []) {
+    if (!Array.isArray(ids) || !ids.length) {
+      return [];
+    }
+
+    const normalizedIds = ids
+      .map((id) => String(id ?? "").trim())
+      .filter(Boolean);
+
+    if (!normalizedIds.length) {
+      return [];
+    }
+
+    const placeholders = normalizedIds.map(() => "?").join(", ");
+    const rows = this.prepare(`
+      SELECT gp.*, m.ingest_id AS source_event_id
+      FROM graph_proposals gp
+      LEFT JOIN messages m ON m.id = gp.message_id
+      WHERE gp.id IN (${placeholders})
+    `).all(...normalizedIds);
+    const rowsById = new Map(rows.map((row) => [row.id, row]));
+
+    return normalizedIds
+      .map((id) => rowsById.get(id))
+      .filter(Boolean);
+  }
+
+  listGraphProposals({
+    status = null,
+    statuses = null,
+    writeClass = null,
+    writeClasses = null,
+    proposalType = null,
+    proposalTypes = null,
+    sourceEventId = null,
+    minConfidence = null,
+    maxConfidence = null,
+    sort = "newest",
+    limit = 100,
+  } = {}) {
+    const normalizeValues = (value) => Array.isArray(value)
+      ? value.map((entry) => String(entry ?? "").trim()).filter(Boolean)
       : [];
 
+    const normalizedStatuses = normalizeValues(statuses);
     if (status && !normalizedStatuses.length) {
       normalizedStatuses.push(String(status).trim());
     }
 
-    const params = [];
-    const whereClause = normalizedStatuses.length
-      ? `WHERE status IN (${normalizedStatuses.map(() => "?").join(", ")})`
-      : "";
+    const normalizedWriteClasses = normalizeValues(writeClasses);
+    if (writeClass && !normalizedWriteClasses.length) {
+      normalizedWriteClasses.push(String(writeClass).trim());
+    }
 
-    params.push(...normalizedStatuses);
-    params.push(Math.max(1, Math.trunc(limit)));
+    const normalizedProposalTypes = normalizeValues(proposalTypes);
+    if (proposalType && !normalizedProposalTypes.length) {
+      normalizedProposalTypes.push(String(proposalType).trim());
+    }
+
+    const clauses = [];
+    const params = [];
+
+    if (normalizedStatuses.length) {
+      clauses.push(`gp.status IN (${normalizedStatuses.map(() => "?").join(", ")})`);
+      params.push(...normalizedStatuses);
+    }
+
+    if (normalizedWriteClasses.length) {
+      clauses.push(`gp.write_class IN (${normalizedWriteClasses.map(() => "?").join(", ")})`);
+      params.push(...normalizedWriteClasses);
+    }
+
+    if (normalizedProposalTypes.length) {
+      clauses.push(`gp.proposal_type IN (${normalizedProposalTypes.map(() => "?").join(", ")})`);
+      params.push(...normalizedProposalTypes);
+    }
+
+    const normalizedSourceEventId = String(sourceEventId ?? "").trim();
+    if (normalizedSourceEventId) {
+      clauses.push(`m.ingest_id = ?`);
+      params.push(normalizedSourceEventId);
+    }
+
+    const hasMinConfidence = minConfidence !== null && minConfidence !== undefined && String(minConfidence).trim() !== "";
+    const normalizedMinConfidence = Number(minConfidence);
+    if (hasMinConfidence && Number.isFinite(normalizedMinConfidence)) {
+      clauses.push(`gp.confidence >= ?`);
+      params.push(normalizedMinConfidence);
+    }
+
+    const hasMaxConfidence = maxConfidence !== null && maxConfidence !== undefined && String(maxConfidence).trim() !== "";
+    const normalizedMaxConfidence = Number(maxConfidence);
+    if (hasMaxConfidence && Number.isFinite(normalizedMaxConfidence)) {
+      clauses.push(`gp.confidence <= ?`);
+      params.push(normalizedMaxConfidence);
+    }
+
+    const whereClause = clauses.length ? `WHERE ${clauses.join(" AND ")}` : "";
+    const sortDirection = String(sort ?? "newest").trim().toLowerCase() === "oldest" ? "ASC" : "DESC";
+    const hasExplicitLimit = limit !== null && limit !== undefined && String(limit).trim() !== "";
+    const resolvedLimit = hasExplicitLimit && Number.isFinite(Number(limit))
+      ? Math.max(1, Math.trunc(Number(limit)))
+      : null;
+    const limitClause = resolvedLimit === null ? "" : "\n      LIMIT ?";
+
+    if (resolvedLimit !== null) {
+      params.push(resolvedLimit);
+    }
 
     return this.prepare(`
-      SELECT *
-      FROM graph_proposals
+      SELECT gp.*, m.ingest_id AS source_event_id
+      FROM graph_proposals gp
+      LEFT JOIN messages m ON m.id = gp.message_id
       ${whereClause}
-      ORDER BY created_at DESC
-      LIMIT ?
+      ORDER BY gp.created_at ${sortDirection}, gp.id ${sortDirection}${limitClause}
     `).all(...params);
   }
 
@@ -2967,6 +3459,130 @@ export class ContextDatabase {
       },
       pendingMutations,
     };
+  }
+
+  // ── Cluster LOD Level Embeddings (v2.4) ───────────────────────────────────
+
+  upsertClusterLevelEmbedding({ clusterId, level, embedding, model = DEFAULT_EMBEDDING_MODEL }) {
+    const serialized = serializeEmbedding(embedding);
+    if (!serialized) {
+      return null;
+    }
+
+    const createdAt = nowIso();
+
+    this.prepare(`
+      INSERT INTO cluster_level_embeddings (cluster_id, level, embedding, model, created_at)
+      VALUES (?, ?, ?, ?, ?)
+      ON CONFLICT(cluster_id, level) DO UPDATE SET
+        embedding = excluded.embedding,
+        model = excluded.model,
+        created_at = excluded.created_at
+    `).run(clusterId, level, serialized, model, createdAt);
+
+    return {
+      clusterId,
+      level,
+      model,
+      createdAt,
+    };
+  }
+
+  getClusterLevelEmbedding(clusterId, level) {
+    const row = this.prepare(`
+      SELECT
+        cluster_id AS clusterId,
+        level,
+        embedding,
+        model,
+        created_at AS createdAt
+      FROM cluster_level_embeddings
+      WHERE cluster_id = ? AND level = ?
+      LIMIT 1
+    `).get(clusterId, level);
+
+    if (!row) {
+      return null;
+    }
+
+    return {
+      ...row,
+      embedding: deserializeEmbedding(row.embedding),
+    };
+  }
+
+  listClusterLevelsMissingEmbeddings(limit = null) {
+    const resolvedLimit = clampLimit(limit);
+    const params = resolvedLimit === null ? [] : [resolvedLimit];
+    const limitClause = resolvedLimit === null ? "" : "\n      LIMIT ?\n    ";
+
+    return this.prepare(`
+      SELECT
+        cl.cluster_id AS clusterId,
+        cl.level,
+        cl.text,
+        oc.topic_label AS topicLabel,
+        oc.entities,
+        oc.created_at AS createdAt
+      FROM cluster_levels cl
+      JOIN observation_clusters oc ON oc.id = cl.cluster_id
+      LEFT JOIN cluster_level_embeddings cle ON cle.cluster_id = cl.cluster_id AND cle.level = cl.level
+      WHERE cle.cluster_id IS NULL
+      ORDER BY cl.generated_at ASC, cl.cluster_id ASC, cl.level ASC${limitClause}
+    `).all(...params);
+  }
+
+  listClusterLevels(clusterId) {
+    return this.prepare(`
+      SELECT
+        cluster_id AS clusterId,
+        level,
+        text,
+        source_observation_ids AS sourceObservationIds,
+        char_count AS charCount,
+        generated_at AS generatedAt
+      FROM cluster_levels
+      WHERE cluster_id = ?
+      ORDER BY level ASC
+    `).all(clusterId);
+  }
+
+  getClusterLevel(clusterId, level) {
+    const row = this.prepare(`
+      SELECT
+        cluster_id AS clusterId,
+        level,
+        text,
+        source_observation_ids AS sourceObservationIds,
+        char_count AS charCount,
+        generated_at AS generatedAt
+      FROM cluster_levels
+      WHERE cluster_id = ? AND level = ?
+      LIMIT 1
+    `).get(clusterId, level);
+
+    return row || null;
+  }
+
+  searchClusterLevelsFts(query, limit = 20) {
+    return this.prepare(`
+      SELECT
+        cluster_id AS clusterId,
+        level,
+        text,
+        rank
+      FROM cluster_level_fts
+      WHERE cluster_level_fts MATCH ?
+      ORDER BY rank
+      LIMIT ?
+    `).all(query, limit);
+  }
+
+  insertClusterLevelFts(clusterId, level, text) {
+    this.prepare(`
+      INSERT INTO cluster_level_fts (text, cluster_id, level)
+      VALUES (?, ?, ?)
+    `).run(text, clusterId, level);
   }
 
   close() {
