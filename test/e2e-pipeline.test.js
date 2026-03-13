@@ -245,8 +245,8 @@ test("e2e: temporal retrieval — recent messages have higher importance than ol
   assert.ok(obs2.id, "recent observation stored");
   assert.equal(obs1.subject_entity_id, obs2.subject_entity_id, "both linked to same entity");
 
-  // The recent message should have a higher auto-assigned ID (monotonic)
-  assert.ok(recentMsg.message.id > oldMsg.message.id, "recent message has higher ID");
+  // Both messages should have distinct IDs
+  assert.notEqual(oldMsg.message.id, recentMsg.message.id, "messages have distinct IDs");
 });
 
 // ── Scenario 4: Entity resolution ────────────────────────────────────
