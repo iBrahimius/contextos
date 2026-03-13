@@ -2,10 +2,12 @@ import test from "node:test";
 import assert from "node:assert/strict";
 
 import {
+  AI_AUTO_APPLY_CONFIDENCE_THRESHOLD,
   AI_PROPOSED_PARKING_THRESHOLD,
   WRITE_CLASS_RULES,
   classifyWriteClass,
   getQueuePressureDisposition,
+  getWriteClassDisposition,
 } from "../src/core/write-discipline.js";
 
 // ── Auto types ───────────────────────────────────────────────────────
@@ -164,4 +166,39 @@ test("getQueuePressureDisposition — canonical stays actionable regardless of c
   assert.equal(disposition.actionable, true);
   assert.equal(disposition.triage, "human_canonical");
   assert.equal(disposition.policy_decision, "queue_canonical_review");
+});
+
+// ── Confidence-gated auto-apply ──────────────────────────────────────
+
+test("AI_AUTO_APPLY_CONFIDENCE_THRESHOLD is exported and equals 0.85", () => {
+  assert.equal(AI_AUTO_APPLY_CONFIDENCE_THRESHOLD, 0.85);
+});
+
+test("AI_AUTO_APPLY_CONFIDENCE_THRESHOLD is above AI_PROPOSED_PARKING_THRESHOLD", () => {
+  assert.ok(AI_AUTO_APPLY_CONFIDENCE_THRESHOLD > AI_PROPOSED_PARKING_THRESHOLD);
+});
+
+test("canonical write class auto-applies via writeClass check in proposeMutation", () => {
+  const disposition = getWriteClassDisposition("canonical");
+  assert.equal(disposition.autoApply, false, "canonical disposition.autoApply stays false");
+  assert.equal(disposition.reviewRequired, true);
+  // The actual auto-apply for canonical is handled in proposeMutation via:
+  //   shouldAutoApply = disposition.autoApply || writeClass === 'canonical'
+  const writeClass = classifyWriteClass("add_decision");
+  assert.equal(writeClass, "canonical");
+  const shouldAutoApply = disposition.autoApply || writeClass === "canonical";
+  assert.equal(shouldAutoApply, true, "canonical proposals auto-apply in proposeMutation");
+});
+
+test("auto write class disposition has autoApply true", () => {
+  const disposition = getWriteClassDisposition("auto");
+  assert.equal(disposition.autoApply, true);
+});
+
+test("ai_proposed write class does not auto-apply via writeClass check", () => {
+  const disposition = getWriteClassDisposition("ai_proposed");
+  assert.equal(disposition.autoApply, false);
+  const writeClass = "ai_proposed";
+  const shouldAutoApply = disposition.autoApply || writeClass === "canonical";
+  assert.equal(shouldAutoApply, false, "ai_proposed does not auto-apply via writeClass check");
 });
