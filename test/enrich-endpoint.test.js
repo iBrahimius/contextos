@@ -7,9 +7,8 @@ import path from "node:path";
 
 import { ContextOS } from "../src/core/context-os.js";
 
-// Known issue: claim creation from observations produces 1 claim instead of 2.
-// This flag marks the affected test for skip until the claim pipeline is fixed.
-const CLAIM_PIPELINE_KNOWN_ISSUE = "known issue: claim pipeline creates 1/2 expected claims (pre-existing)";
+// AI_AUTO_APPLY_CONFIDENCE_THRESHOLD is 0.85 — observations below this
+// become graph proposals instead of claims. Test data must stay above it.
 import { handleRequest } from "../src/http/router.js";
 
 async function makeRoot() {
@@ -179,7 +178,7 @@ test("POST /api/ingest/enrich stores entities and observations for an ingested m
   }
 });
 
-test("POST /api/ingest/enrich creates claims for each stored observation and reports the count", { skip: CLAIM_PIPELINE_KNOWN_ISSUE }, async () => {
+test("POST /api/ingest/enrich creates claims for each stored observation and reports the count", async () => {
   const harness = await createHarness();
 
   try {
@@ -217,7 +216,7 @@ test("POST /api/ingest/enrich creates claims for each stored observation and rep
           detail: "ContextOS runs claim projection after observation persistence.",
           subjectLabel: "ContextOS",
           predicate: "status",
-          confidence: 0.82,
+          confidence: 0.90,
         },
       ],
       graphProposals: [],
