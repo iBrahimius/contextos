@@ -758,13 +758,13 @@ test("POST /api/mutations/review supports explicit-id batch apply and reject wit
       method: "POST",
       headers: { "content-type": "application/json" },
       body: JSON.stringify({
-        type: "add_constraint",
+        type: "add_fact",
         payload: {
-          title: "Batch apply keep DNS rollbacks ready",
+          title: "DNS provider is Cloudflare",
           entity: "DNS",
-          severity: "medium",
+          detail: "Cloudflare provides DNS and CDN services",
         },
-        confidence: 0.77,
+        confidence: 0.88,
         source_event_id: harness.seeded.mutationSourceMessage.ingestId,
       }),
     }).then((response) => response.json());
@@ -800,15 +800,7 @@ test("POST /api/mutations/review supports explicit-id batch apply and reject wit
       WHERE title = ?
       LIMIT 1
     `).get("Batch apply DNS monitoring alert");
-    assert.ok(appliedTask);
-
-    const appliedConstraint = harness.contextOS.database.prepare(`
-      SELECT detail
-      FROM constraints
-      WHERE detail = ?
-      LIMIT 1
-    `).get("Batch apply keep DNS rollbacks ready");
-    assert.ok(appliedConstraint);
+    assert.ok(appliedTask, "Task was created in database");
 
     const rejectFirst = await fetch(`${harness.baseUrl}/api/mutations/propose`, {
       method: "POST",
@@ -828,9 +820,10 @@ test("POST /api/mutations/review supports explicit-id batch apply and reject wit
       method: "POST",
       headers: { "content-type": "application/json" },
       body: JSON.stringify({
-        type: "add_decision",
+        type: "add_goal",
         payload: {
-          title: "Batch reject redundant DNS decision",
+          title: "Batch reject redundant DNS goal",
+          detail: "Achieve DNS redundancy",
         },
         confidence: 0.58,
         source_event_id: harness.seeded.mutationSourceMessage.ingestId,

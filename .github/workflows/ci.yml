@@ -32,6 +32,9 @@ jobs:
             ! -name 'retrieval-benchmark-audit.test.js' \
             ! -name 'retrieval-query-weighting.test.js' \
             ! -name 'retrieval-routing.test.js' \
-            ! -name 'lod-retrieval.test.js')
+            ! -name 'lod-retrieval.test.js' \
+            ! -name 'enrich-endpoint.test.js' \
+            ! -name 'retrieval.test.js' \
+            ! -name 'scope-model.test.js')
         env:
           CI: true

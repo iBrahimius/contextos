@@ -3540,29 +3540,31 @@ export class ContextOS {
         .join("; ")
         .slice(0, 500);
 
-      const summaryObs = this.database.insertObservation({
-        conversationId: bestRow.conversationId,
-        messageId: bestRow.messageId,
-        actorId: bestRow.actorId ?? "system",
-        category: bestRow.category,
-        predicate: bestRow.predicate ?? null,
-        subjectEntityId: bestRow.subject_entity_id ?? null,
-        objectEntityId: bestRow.object_entity_id ?? null,
-        detail: summaryDetail,
-        confidence: Number(bestRow.confidence ?? 0.5),
-        sourceSpan: null,
-        metadata: {
-          compressed_count: capped.length,
-          compressed_from: capped.map((row) => row.id),
-        },
-        scopeKind: bestRow.scopeKind ?? "private",
-        scopeId: bestRow.scopeId ?? null,
+      const compressedIds = capped.map((row) => row.id);
+      const { summaryObs, markedCount } = this.database.withTransaction(() => {
+        const summaryObs = this.database.insertObservation({
+          conversationId: bestRow.conversationId,
+          messageId: bestRow.messageId,
+          actorId: bestRow.actorId ?? "system",
+          category: bestRow.category,
+          predicate: bestRow.predicate ?? null,
+          subjectEntityId: bestRow.subject_entity_id ?? null,
+          objectEntityId: bestRow.object_entity_id ?? null,
+          detail: summaryDetail,
+          confidence: Number(bestRow.confidence ?? 0.5),
+          sourceSpan: null,
+          metadata: {
+            compressed_count: capped.length,
+            compressed_from: capped.map((row) => row.id),
+          },
+          scopeKind: bestRow.scopeKind ?? "private",
+          scopeId: bestRow.scopeId ?? null,
+        });
+        const markedCount = this.database.markObservationsCompressed(compressedIds, summaryObs.id);
+        this.database.relinkClaimsToObservation(compressedIds, summaryObs.id);
+        return { summaryObs, markedCount };
       });
       this.graph.updateGraphVersion(summaryObs.graphVersion);
-
-      const compressedIds = capped.map((row) => row.id);
-      const markedCount = this.database.markObservationsCompressed(compressedIds, summaryObs.id);
-      this.database.relinkClaimsToObservation(compressedIds, summaryObs.id);
 
       // Enqueue embedding for the summary
       this.enqueueObservationEmbedding({ id: summaryObs.id, detail: summaryDetail });

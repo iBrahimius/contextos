@@ -394,6 +394,7 @@ export class ContextDatabase {
     this.dbPath = dbPath;
     fs.mkdirSync(path.dirname(dbPath), { recursive: true });
     this.sqlite = new DatabaseSync(dbPath);
+    this._inTransaction = false;
 
     // Enable WAL mode for concurrent reads, better write performance, and crash resilience.
     // PRAGMA journal_mode is persistent — only needs to be set once per database file,
@@ -486,9 +487,7 @@ export class ContextDatabase {
 
   bumpGraphVersion() {
     const timestamp = nowIso();
-
-    this.sqlite.exec("BEGIN IMMEDIATE");
-    try {
+    return this.withTransaction(() => {
       this.prepare(`
         INSERT OR IGNORE INTO system_state (key, value, updated_at)
         VALUES ('graph_version', '0', ?)
@@ -501,13 +500,8 @@ export class ContextDatabase {
         WHERE key = 'graph_version'
       `).run(timestamp);
 
-      const nextVersion = this.getGraphVersion();
-      this.sqlite.exec("COMMIT");
-      return nextVersion;
-    } catch (error) {
-      this.sqlite.exec("ROLLBACK");
-      throw error;
-    }
+      return this.getGraphVersion();
+    });
   }
 
   prepare(sql) {
@@ -516,6 +510,24 @@ export class ContextDatabase {
     }
 
     return this.statements.get(sql);
+  }
+
+  withTransaction(fn) {
+    if (this._inTransaction) {
+      return fn();
+    }
+    this.sqlite.exec("BEGIN IMMEDIATE");
+    this._inTransaction = true;
+    try {
+      const result = fn();
+      this.sqlite.exec("COMMIT");
+      return result;
+    } catch (error) {
+      this.sqlite.exec("ROLLBACK");
+      throw error;
+    } finally {
+      this._inTransaction = false;
+    }
   }
 
   createConversation(title = "Untitled Conversation") {
@@ -594,57 +606,59 @@ export class ContextDatabase {
     scopeKind = "private",
     scopeId = null,
   }) {
-    const id = createId("msg");
-    const capturedAt = nowIso();
-    const resolvedIngestId = ingestId ?? createId("ing");
+    return this.withTransaction(() => {
+      const id = createId("msg");
+      const capturedAt = nowIso();
+      const resolvedIngestId = ingestId ?? createId("ing");
 
-    const result = this.prepare(`
-      INSERT OR IGNORE INTO messages (
-        id, conversation_id, role, direction, actor_id, origin_kind, source_message_id, scope_kind,
-        scope_id, content, token_count, captured_at, raw_json, ingest_id
-      )
-      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-    `).run(
-      id,
-      conversationId,
-      role,
-      direction,
-      actorId,
-      originKind,
-      sourceMessageId,
-      scopeKind,
-      scopeId,
-      content,
-      tokenCount,
-      capturedAt,
-      stableJson(raw),
-      resolvedIngestId,
-    );
+      const result = this.prepare(`
+        INSERT OR IGNORE INTO messages (
+          id, conversation_id, role, direction, actor_id, origin_kind, source_message_id, scope_kind,
+          scope_id, content, token_count, captured_at, raw_json, ingest_id
+        )
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+      `).run(
+        id,
+        conversationId,
+        role,
+        direction,
+        actorId,
+        originKind,
+        sourceMessageId,
+        scopeKind,
+        scopeId,
+        content,
+        tokenCount,
+        capturedAt,
+        stableJson(raw),
+        resolvedIngestId,
+      );
 
-    if (!result.changes) {
+      if (!result.changes) {
+        return {
+          ...this.getMessageByIngestId(resolvedIngestId),
+          deduped: true,
+        };
+      }
+
+      this.touchConversation(conversationId);
       return {
-        ...this.getMessageByIngestId(resolvedIngestId),
-        deduped: true,
+        id,
+        conversationId,
+        role,
+        direction,
+        actorId,
+        originKind,
+        sourceMessageId,
+        scopeKind,
+        scopeId,
+        content,
+        tokenCount,
+        capturedAt,
+        ingestId: resolvedIngestId,
+        deduped: false,
       };
-    }
-
-    this.touchConversation(conversationId);
-    return {
-      id,
-      conversationId,
-      role,
-      direction,
-      actorId,
-      originKind,
-      sourceMessageId,
-      scopeKind,
-      scopeId,
-      content,
-      tokenCount,
-      capturedAt,
-      ingestId: resolvedIngestId,
-      deduped: false,
-    };
+    });
   }
 
   getMessageByIngestId(ingestId) {
@@ -1432,27 +1446,29 @@ export class ContextDatabase {
     scopeId = null,
     ownerId = "system",
   }) {
-    const id = createId("ent");
-    const timestamp = nowIso();
-    const slug = slugify(label);
+    return this.withTransaction(() => {
+      const id = createId("ent");
+      const timestamp = nowIso();
+      const slug = slugify(label);
 
-    this.prepare(`
-      INSERT INTO entities (
-        id, slug, label, kind, summary, complexity_score, mention_count, miss_count,
-        scope_kind, scope_id, owner_id, metadata_json, created_at, updated_at, last_seen_at
-      )
-      VALUES (?, ?, ?, ?, ?, 1, 1, 0, ?, ?, ?, ?, ?, ?, ?)
-    `).run(id, slug, label, kind, summary, scopeKind, scopeId, ownerId, stableJson(metadata), timestamp, timestamp, timestamp);
+      this.prepare(`
+        INSERT INTO entities (
+          id, slug, label, kind, summary, complexity_score, mention_count, miss_count,
+          scope_kind, scope_id, owner_id, metadata_json, created_at, updated_at, last_seen_at
+        )
+        VALUES (?, ?, ?, ?, ?, 1, 1, 0, ?, ?, ?, ?, ?, ?, ?)
+      `).run(id, slug, label, kind, summary, scopeKind, scopeId, ownerId, stableJson(metadata), timestamp, timestamp, timestamp);
 
-    for (const alias of aliases) {
-      this.insertEntityAlias(id, alias);
-    }
+      for (const alias of aliases) {
+        this.insertEntityAlias(id, alias);
+      }
 
-    const graphVersion = this.bumpGraphVersion();
-    return {
-      ...this.getEntity(id),
-      graphVersion,
-    };
+      const graphVersion = this.bumpGraphVersion();
+      return {
+        ...this.getEntity(id),
+        graphVersion,
+      };
+    });
   }
 
   updateEntity(
@@ -1471,53 +1487,55 @@ export class ContextDatabase {
       complexityDelta = 0,
     },
   ) {
-    const current = this.getEntity(id);
-    const timestamp = nowIso();
-    const nextLabel = label ?? current.label;
-    const nextKind = kind ?? current.kind;
-    const nextSummary = summary ?? current.summary;
-    const nextScopeKind = scopeKind ?? current.scope_kind ?? "shared";
-    const nextScopeId = scopeId === undefined ? current.scope_id ?? null : scopeId;
-    const nextOwnerId = ownerId ?? current.owner_id ?? "system";
-    const nextMetadata = metadata ?? parseJson(current.metadata_json, null);
-    const mentionCount = current.mention_count + mentionIncrement;
-    const missCount = current.miss_count + missIncrement;
-    const complexityScore = Math.max(1, Number(current.complexity_score) + complexityDelta);
+    return this.withTransaction(() => {
+      const current = this.getEntity(id);
+      const timestamp = nowIso();
+      const nextLabel = label ?? current.label;
+      const nextKind = kind ?? current.kind;
+      const nextSummary = summary ?? current.summary;
+      const nextScopeKind = scopeKind ?? current.scope_kind ?? "shared";
+      const nextScopeId = scopeId === undefined ? current.scope_id ?? null : scopeId;
+      const nextOwnerId = ownerId ?? current.owner_id ?? "system";
+      const nextMetadata = metadata ?? parseJson(current.metadata_json, null);
+      const mentionCount = current.mention_count + mentionIncrement;
+      const missCount = current.miss_count + missIncrement;
+      const complexityScore = Math.max(1, Number(current.complexity_score) + complexityDelta);
 
-    this.prepare(`
-      UPDATE entities
-      SET label = ?, kind = ?, summary = ?, complexity_score = ?, mention_count = ?, miss_count = ?,
-          scope_kind = ?, scope_id = ?, owner_id = ?, metadata_json = ?, updated_at = ?, last_seen_at = ?
-      WHERE id = ?
-    `).run(
-      nextLabel,
-      nextKind,
-      nextSummary,
-      complexityScore,
-      mentionCount,
-      missCount,
-      nextScopeKind,
-      nextScopeId,
-      nextOwnerId,
-      stableJson(nextMetadata),
-      timestamp,
-      timestamp,
-      id,
-    );
+      this.prepare(`
+        UPDATE entities
+        SET label = ?, kind = ?, summary = ?, complexity_score = ?, mention_count = ?, miss_count = ?,
+            scope_kind = ?, scope_id = ?, owner_id = ?, metadata_json = ?, updated_at = ?, last_seen_at = ?
+        WHERE id = ?
+      `).run(
+        nextLabel,
+        nextKind,
+        nextSummary,
+        complexityScore,
+        mentionCount,
+        missCount,
+        nextScopeKind,
+        nextScopeId,
+        nextOwnerId,
+        stableJson(nextMetadata),
+        timestamp,
+        timestamp,
+        id,
+      );
 
-    if (nextLabel !== current.label) {
-      this.prepare(`UPDATE entities SET slug = ? WHERE id = ?`).run(slugify(nextLabel), id);
-    }
+      if (nextLabel !== current.label) {
+        this.prepare(`UPDATE entities SET slug = ? WHERE id = ?`).run(slugify(nextLabel), id);
+      }
 
-    for (const alias of aliases) {
-      this.insertEntityAlias(id, alias);
-    }
+      for (const alias of aliases) {
+        this.insertEntityAlias(id, alias);
+      }
 
-    const graphVersion = this.bumpGraphVersion();
-    return {
-      ...this.getEntity(id),
-      graphVersion,
-    };
+      const graphVersion = this.bumpGraphVersion();
+      return {
+        ...this.getEntity(id),
+        graphVersion,
+      };
+    });
   }
 
   insertEntityAlias(entityId, alias) {
@@ -2110,82 +2128,84 @@ export class ContextDatabase {
   }
 
   updateClaim(id, fields) {
-    const existing = this.getClaim(id);
-    if (!existing) {
-      return null;
-    }
-
-    const allowedColumns = new Map([
-      ["value_text", "value_text"],
-      ["valueText", "value_text"],
-      ["lifecycle_state", "lifecycle_state"],
-      ["lifecycleState", "lifecycle_state"],
-      ["valid_to", "valid_to"],
-      ["validTo", "valid_to"],
-      ["supersedes_claim_id", "supersedes_claim_id"],
-      ["supersedesClaimId", "supersedes_claim_id"],
-      ["superseded_by_claim_id", "superseded_by_claim_id"],
-      ["supersededByClaimId", "superseded_by_claim_id"],
-      ["metadata_json", "metadata_json"],
-      ["metadataJson", "metadata_json"],
-      ["importance_score", "importance_score"],
-      ["importanceScore", "importance_score"],
-    ]);
-    const pendingValues = new Map();
-
-    for (const [key, value] of Object.entries(fields ?? {})) {
-      const column = allowedColumns.get(key);
-      if (!column) {
-        throw new Error(`Cannot update claim field: ${key}`);
+    return this.withTransaction(() => {
+      const existing = this.getClaim(id);
+      if (!existing) {
+        return null;
       }
 
-      const resolvedValue = column === "metadata_json" && typeof value !== "string"
-        ? stableJson(value)
-        : column === "importance_score"
-          ? normalizeImportanceValue(value)
-          : value;
-      pendingValues.set(column, resolvedValue);
-    }
+      const allowedColumns = new Map([
+        ["value_text", "value_text"],
+        ["valueText", "value_text"],
+        ["lifecycle_state", "lifecycle_state"],
+        ["lifecycleState", "lifecycle_state"],
+        ["valid_to", "valid_to"],
+        ["validTo", "valid_to"],
+        ["supersedes_claim_id", "supersedes_claim_id"],
+        ["supersedesClaimId", "supersedes_claim_id"],
+        ["superseded_by_claim_id", "superseded_by_claim_id"],
+        ["supersededByClaimId", "superseded_by_claim_id"],
+        ["metadata_json", "metadata_json"],
+        ["metadataJson", "metadata_json"],
+        ["importance_score", "importance_score"],
+        ["importanceScore", "importance_score"],
+      ]);
+      const pendingValues = new Map();
 
-    if (pendingValues.has("lifecycle_state") || pendingValues.has("superseded_by_claim_id")) {
-      const lifecycleState = normalizeLifecycleStateWrite({
-        currentClaim: existing,
-        nextState: pendingValues.has("lifecycle_state")
-          ? pendingValues.get("lifecycle_state")
-          : existing.lifecycle_state,
-        supersededByClaimId: pendingValues.has("superseded_by_claim_id")
-          ? pendingValues.get("superseded_by_claim_id")
-          : existing.superseded_by_claim_id,
-      });
-      pendingValues.set("lifecycle_state", lifecycleState);
+      for (const [key, value] of Object.entries(fields ?? {})) {
+        const column = allowedColumns.get(key);
+        if (!column) {
+          throw new Error(`Cannot update claim field: ${key}`);
+        }
 
-      if (lifecycleState === "superseded") {
-        const existingValidTo = pendingValues.has("valid_to") ? pendingValues.get("valid_to") : existing.valid_to;
-        pendingValues.set("valid_to", existingValidTo ?? nowIso());
+        const resolvedValue = column === "metadata_json" && typeof value !== "string"
+          ? stableJson(value)
+          : column === "importance_score"
+            ? normalizeImportanceValue(value)
+            : value;
+        pendingValues.set(column, resolvedValue);
       }
 
-      if (lifecycleState === "active" && pendingValues.has("valid_to")) {
-        pendingValues.set("valid_to", null);
+      if (pendingValues.has("lifecycle_state") || pendingValues.has("superseded_by_claim_id")) {
+        const lifecycleState = normalizeLifecycleStateWrite({
+          currentClaim: existing,
+          nextState: pendingValues.has("lifecycle_state")
+            ? pendingValues.get("lifecycle_state")
+            : existing.lifecycle_state,
+          supersededByClaimId: pendingValues.has("superseded_by_claim_id")
+            ? pendingValues.get("superseded_by_claim_id")
+            : existing.superseded_by_claim_id,
+        });
+        pendingValues.set("lifecycle_state", lifecycleState);
+
+        if (lifecycleState === "superseded") {
+          const existingValidTo = pendingValues.has("valid_to") ? pendingValues.get("valid_to") : existing.valid_to;
+          pendingValues.set("valid_to", existingValidTo ?? nowIso());
+        }
+
+        if (lifecycleState === "active" && pendingValues.has("valid_to")) {
+          pendingValues.set("valid_to", null);
+        }
       }
-    }
 
-    const updates = [];
-    const params = [];
-    for (const [column, value] of pendingValues.entries()) {
-      updates.push(`${column} = ?`);
-      params.push(value);
-    }
+      const updates = [];
+      const params = [];
+      for (const [column, value] of pendingValues.entries()) {
+        updates.push(`${column} = ?`);
+        params.push(value);
+      }
 
-    updates.push("updated_at = ?");
-    params.push(nowIso(), id);
+      updates.push("updated_at = ?");
+      params.push(nowIso(), id);
 
-    this.prepare(`
-      UPDATE claims
-      SET ${updates.join(", ")}
-      WHERE id = ?
-    `).run(...params);
+      this.prepare(`
+        UPDATE claims
+        SET ${updates.join(", ")}
+        WHERE id = ?
+      `).run(...params);
 
-    return this.getClaim(id);
+      return this.getClaim(id);
+    });
   }
 
   getClaimStateStats() {
@@ -2509,30 +2529,32 @@ export class ContextDatabase {
    * @returns {object} The inserted checkpoint row
    */
   saveSessionCheckpoint({ graphVersion, activeTaskIds = [], activeDecisionIds = [], activeGoalIds = [] }) {
-    const savedAt = nowIso();
+    return this.withTransaction(() => {
+      const savedAt = nowIso();
 
-    this.sqlite.prepare(`
-      INSERT INTO session_checkpoints (graph_version, saved_at, active_task_ids, active_decision_ids, active_goal_ids)
-      VALUES (?, ?, ?, ?, ?)
-    `).run(
-      graphVersion,
-      savedAt,
-      JSON.stringify(activeTaskIds),
-      JSON.stringify(activeDecisionIds),
-      JSON.stringify(activeGoalIds),
-    );
+      this.sqlite.prepare(`
+        INSERT INTO session_checkpoints (graph_version, saved_at, active_task_ids, active_decision_ids, active_goal_ids)
+        VALUES (?, ?, ?, ?, ?)
+      `).run(
+        graphVersion,
+        savedAt,
+        JSON.stringify(activeTaskIds),
+        JSON.stringify(activeDecisionIds),
+        JSON.stringify(activeGoalIds),
+      );
 
-    // Keep max 10 checkpoints: delete all but the 10 most recent
-    this.sqlite.prepare(`
-      DELETE FROM session_checkpoints
-      WHERE id NOT IN (
-        SELECT id FROM session_checkpoints
-        ORDER BY id DESC
-        LIMIT 10
-      )
-    `).run();
+      // Keep max 10 checkpoints: delete all but the 10 most recent
+      this.sqlite.prepare(`
+        DELETE FROM session_checkpoints
+        WHERE id NOT IN (
+          SELECT id FROM session_checkpoints
+          ORDER BY id DESC
+          LIMIT 10
+        )
+      `).run();
 
-    return this.loadLatestCheckpoint();
+      return this.loadLatestCheckpoint();
+    });
   }
 
   /**
