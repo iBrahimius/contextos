@@ -15,7 +15,7 @@ import { PreconsciousBuffer } from "./preconscious.js";
 import { RetrievalEngine } from "./retrieval.js";
 import { VectorIndex } from "./vector-index.js";
 import { clamp, estimateTokens, parseJson } from "./utils.js";
-import { classifyWriteClass, getQueuePressureDisposition, getWriteClassDisposition } from "./write-discipline.js";
+import { AI_AUTO_APPLY_CONFIDENCE_THRESHOLD, classifyWriteClass, getQueuePressureDisposition, getWriteClassDisposition } from "./write-discipline.js";
 import { createAssemblyCache } from "./assembly-cache.js";
 import { analyzeClaimsTruthSet, ensureClaimForObservation, selectPreferredClaimsByResolution } from "../core/claim-resolution.js";
 import { ContextDatabase } from "../db/database.js";
@@ -702,7 +702,7 @@ export class ContextOS {
     }
 
     for (const observation of patch.observations) {
-      if ((observation.category === "relationship" && observation.confidence < 0.6) || (observation.category !== "relationship" && observation.confidence < 0.55)) {
+      if (observation.confidence < AI_AUTO_APPLY_CONFIDENCE_THRESHOLD) {
         const storedProposal = this.database.insertGraphProposal({
           conversationId,
           messageId,
@@ -2509,7 +2509,7 @@ export class ContextOS {
     const normalizedConfidence = clamp(Number(confidence) || 0.5, 0, 1);
     const writeClass = classifyWriteClass(type);
     const disposition = getWriteClassDisposition(writeClass);
-    const shouldAutoApply = disposition.autoApply;
+    const shouldAutoApply = disposition.autoApply || writeClass === 'canonical';
     const _queueReason = disposition.queueReason;
 
     const stored = this.database.insertGraphProposal({
@@ -2531,7 +2531,7 @@ export class ContextOS {
     });
     this.graph.updateGraphVersion(stored.graphVersion);
 
-    // v2.3: auto and high-confidence ai_proposed apply immediately (canonical always queues)
+    // v2.3: auto and canonical apply immediately; ai_proposed queues for review
     if (shouldAutoApply) {
       try {
         const proposal = this.database.getGraphProposal(stored.id);

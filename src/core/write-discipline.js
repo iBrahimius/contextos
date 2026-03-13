@@ -6,9 +6,13 @@
  *   - ai_proposed: Queue for review as an AI-authored proposal
  *   - canonical:   Always queue for human approval, never auto-apply
  *
- * The runtime does not auto-accept `ai_proposed` mutations. Instead, v2.12 adds
- * an explicit queue-pressure policy that parks only low-confidence AI proposals in
- * a visible backlog bucket while keeping them auditable and manually reviewable.
+ * The runtime uses a two-tier confidence system for AI-proposed observations:
+ *   - < 0.60: parked (low confidence backlog)
+ *   - 0.60–0.84: queued for human review (actionable)
+ *   - >= 0.85: auto-applied (high confidence)
+ *
+ * Canonical mutations (decisions, constraints, projects) are auto-applied when
+ * proposed directly via proposeMutation.
  *
  * @module write-discipline
  */
@@ -44,6 +48,7 @@ export const WRITE_CLASS_RULES = {
 };
 
 export const AI_PROPOSED_PARKING_THRESHOLD = 0.6;
+export const AI_AUTO_APPLY_CONFIDENCE_THRESHOLD = 0.85;
 export const QUEUE_PRESSURE_POLICY_KEY = "low_confidence_ai_proposed_parking";
 export const QUEUE_PRESSURE_POLICY_VERSION = "v2.12";
 
