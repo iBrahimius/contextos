@@ -1254,20 +1254,20 @@
     ]
   },
   {
-    "timestamp": "2026-03-13T19:15:57.744Z",
+    "timestamp": "2026-03-13T19:28:01.132Z",
     "label": "baseline",
     "queryCount": 22,
-    "avgPrecisionAt5": 0.133,
+    "avgPrecisionAt5": 0.121,
     "avgMRR": 0.167,
     "passRate": 0.273,
     "artifactLeakRate": 0.182,
     "p50LatencyMs": null,
     "p95LatencyMs": null,
-    "totalDurationMs": 3594,
+    "totalDurationMs": 3599,
     "byIntent": {
       "simple": {
         "count": 8,
-        "avgPrecision": 0.125,
+        "avgPrecision": 0.094,
         "avgMRR": 0.125,
         "passRate": 0.125,
         "artifactLeakRate": 0.125
@@ -1297,7 +1297,7 @@
       },
       "history_temporal": {
         "count": 6,
-        "avgPrecision": 0.208,
+        "avgPrecision": 0.167,
         "avgMRR": 0.222,
         "passRate": 0.5,
         "artifactLeakRate": 0.167
@@ -1581,7 +1581,7 @@
         "id": "temporal-02",
         "intent": "simple",
         "route": "history_temporal",
-        "precisionAt5": 1,
+        "precisionAt5": 0.75,
         "mrr": 1,
         "pass": true,
         "typeMatch": true,

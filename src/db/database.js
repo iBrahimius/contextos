@@ -425,6 +425,7 @@ export class ContextDatabase {
     this.applyTableMigrations();
     this.sqlite.exec(SCHEMA);
     this.statements = new Map();
+    this._stmtMaxSize = 500;
     this.applyIndexMigrations();
     this.backfillObservationFts();
   }
@@ -514,11 +515,24 @@ export class ContextDatabase {
   }
 
   prepare(sql) {
-    if (!this.statements.has(sql)) {
-      this.statements.set(sql, this.sqlite.prepare(sql));
+    if (this.statements.has(sql)) {
+      // Move to end for LRU ordering (Map iteration order = insertion order)
+      const stmt = this.statements.get(sql);
+      this.statements.delete(sql);
+      this.statements.set(sql, stmt);
+      return stmt;
     }
 
-    return this.statements.get(sql);
+    const stmt = this.sqlite.prepare(sql);
+    this.statements.set(sql, stmt);
+
+    // Evict oldest entry if cache exceeds max size
+    if (this.statements.size > this._stmtMaxSize) {
+      const oldest = this.statements.keys().next().value;
+      this.statements.delete(oldest);
+    }
+
+    return stmt;
   }
 
   withTransaction(fn) {
