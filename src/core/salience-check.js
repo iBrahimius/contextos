@@ -18,7 +18,7 @@
  */
 export function checkSalience(mutation, context = {}) {
   const { type, payload } = mutation;
-  const { database, focusedEntityId, config } = context;
+  const { focusedEntityId, config } = context;
 
   // Trigger 1: Task → blocked
   if (type === "update_task" && payload?.lifecycle_state === "blocked") {
