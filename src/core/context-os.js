@@ -52,11 +52,11 @@ function defaultOriginKindForRole(role) {
 }
 
 const RECALL_SCOPE_TYPES = {
-  all: new Set(["message", "task", "decision", "constraint", "fact", "relationship"]),
+  all: new Set(["message", "task", "decision", "constraint", "fact", "relationship", "claim"]),
   decisions: new Set(["decision"]),
   tasks: new Set(["task"]),
   constraints: new Set(["constraint"]),
-  recent: new Set(["message", "task", "decision", "constraint", "fact", "relationship"]),
+  recent: new Set(["message", "task", "decision", "constraint", "fact", "relationship", "claim"]),
 };
 const EMBEDDING_BACKFILL_BATCH_SIZE = 10;
 const EMBEDDING_BACKFILL_RATE_PER_SECOND = 10;

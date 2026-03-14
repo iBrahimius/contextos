@@ -2610,7 +2610,9 @@ export class RetrievalEngine {
             ...claim,
             vectorScore: cosineSimilarity(queryEmbedding, claim.embedding),
           }))
-          .filter((claim) => Number.isFinite(claim.vectorScore) && claim.vectorScore > 0.3)
+          // Short claim sentences produce lower cosine scores than long observation chunks.
+          // Use 0.1 floor (vs 0.3 for indexed observations) to capture relevant short-form claims.
+          .filter((claim) => Number.isFinite(claim.vectorScore) && claim.vectorScore > 0.1)
           .sort((left, right) => right.vectorScore - left.vectorScore)
           .slice(0, 30)
           .map((claim) => decorateRetrievalResult({

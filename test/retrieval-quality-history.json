@@ -1254,7 +1254,7 @@
     ]
   },
   {
-    "timestamp": "2026-03-14T18:21:04.752Z",
+    "timestamp": "2026-03-14T18:46:39.151Z",
     "label": "baseline",
     "queryCount": 22,
     "avgPrecisionAt5": 0.295,
@@ -1263,7 +1263,7 @@
     "artifactLeakRate": 0.182,
     "p50LatencyMs": null,
     "p95LatencyMs": null,
-    "totalDurationMs": 3984,
+    "totalDurationMs": 5601,
     "byIntent": {
       "simple": {
         "count": 8,
