@@ -191,8 +191,11 @@ export class EntityGraph {
     const existing = this.database.findEntityBySlugOrAlias(label);
 
     if (existing) {
+      // Allow specific kind upgrades: concept → anything, component → person
+      const shouldUpgradeKind = existing.kind === "concept"
+        || (existing.kind === "component" && kind === "person");
       const updatedRow = this.database.updateEntity(existing.id, {
-        kind: existing.kind === "concept" ? kind : existing.kind,
+        kind: shouldUpgradeKind ? kind : existing.kind,
         summary: existing.summary ?? summary,
         aliases,
         metadata: { ...(existing.metadata_json ? JSON.parse(existing.metadata_json) : {}), ...(metadata ?? {}) },
