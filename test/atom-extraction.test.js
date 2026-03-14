@@ -185,3 +185,30 @@ test("persistAtoms - writes atoms to database", async () => {
   await persistAtoms(testDb, 42, atoms);
   assert.equal(runCount, 2);
 });
+
+test("persistAtoms - writes to real cluster_atoms table", async () => {
+  const { DatabaseSync } = await import("node:sqlite");
+  const { SCHEMA } = await import("../src/db/schema.js");
+
+  const db = new DatabaseSync(":memory:");
+  db.exec(SCHEMA);
+
+  // Insert prerequisite rows
+  db.exec(`INSERT INTO episodes (id, started_at, created_at) VALUES ('ep1', datetime('now'), datetime('now'))`);
+  db.exec(`INSERT INTO observation_clusters (id, episode_id, time_span_start, time_span_end) VALUES ('cl1', 'ep1', datetime('now'), datetime('now'))`);
+
+  const atoms = [
+    { type: "fact", text: "Alice prefers async", source_observation_ids: [1], confidence: 0.9 },
+    { type: "decision", text: "Use SQLite", source_observation_ids: [2, 3], confidence: 0.85 },
+  ];
+
+  await persistAtoms(db, "cl1", atoms);
+
+  const rows = db.prepare("SELECT * FROM cluster_atoms WHERE cluster_id = ?").all("cl1");
+  assert.equal(rows.length, 2);
+  assert.equal(rows[0].atom_type, "fact");
+  assert.equal(rows[0].text, "Alice prefers async");
+  assert.equal(rows[0].confidence, 0.9);
+  assert.equal(rows[1].atom_type, "decision");
+  assert.deepEqual(JSON.parse(rows[1].source_observation_ids), [2, 3]);
+});

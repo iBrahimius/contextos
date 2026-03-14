@@ -1254,22 +1254,22 @@
     ]
   },
   {
-    "timestamp": "2026-03-14T14:00:43.288Z",
+    "timestamp": "2026-03-14T14:55:20.763Z",
     "label": "baseline",
     "queryCount": 22,
     "avgPrecisionAt5": 0.148,
-    "avgMRR": 0.17,
-    "passRate": 0.227,
+    "avgMRR": 0.205,
+    "passRate": 0.273,
     "artifactLeakRate": 0.182,
     "p50LatencyMs": null,
     "p95LatencyMs": null,
-    "totalDurationMs": 3249,
+    "totalDurationMs": 3204,
     "byIntent": {
       "simple": {
         "count": 8,
         "avgPrecision": 0.188,
-        "avgMRR": 0.031,
-        "passRate": 0,
+        "avgMRR": 0.125,
+        "passRate": 0.125,
         "artifactLeakRate": 0.125
       },
       "hybrid": {
@@ -1312,8 +1312,8 @@
       "entity_state": {
         "count": 3,
         "avgPrecision": 0.333,
-        "avgMRR": 0.083,
-        "passRate": 0,
+        "avgMRR": 0.333,
+        "passRate": 0.333,
         "artifactLeakRate": 0.333
       },
       "mixed": {
@@ -1341,10 +1341,12 @@
         "intent": "simple",
         "route": "entity_state",
         "precisionAt5": 1,
-        "mrr": 0.25,
-        "pass": false,
+        "mrr": 1,
+        "pass": true,
         "typeMatch": false,
         "artifactViolations": [
+          "term:contextos.db",
+          "term:audit",
           "term:benchmark"
         ],
         "familyCounts": {
