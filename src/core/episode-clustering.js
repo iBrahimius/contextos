@@ -286,7 +286,7 @@ export function clusterObservations(db, options = {}) {
       created_at,
       compressed_into
     FROM observations
-    WHERE 1 = 1
+    WHERE compressed_into IS NULL
       ${since ? 'AND created_at >= ?' : ''}
       ${until ? 'AND created_at <= ?' : ''}
     ORDER BY created_at ASC

@@ -1254,16 +1254,16 @@
     ]
   },
   {
-    "timestamp": "2026-03-14T14:55:20.763Z",
+    "timestamp": "2026-03-14T16:23:36.503Z",
     "label": "baseline",
     "queryCount": 22,
-    "avgPrecisionAt5": 0.148,
+    "avgPrecisionAt5": 0.17,
     "avgMRR": 0.205,
     "passRate": 0.273,
-    "artifactLeakRate": 0.182,
+    "artifactLeakRate": 0.227,
     "p50LatencyMs": null,
     "p95LatencyMs": null,
-    "totalDurationMs": 3204,
+    "totalDurationMs": 3191,
     "byIntent": {
       "simple": {
         "count": 8,
@@ -1274,10 +1274,10 @@
       },
       "hybrid": {
         "count": 8,
-        "avgPrecision": 0.094,
+        "avgPrecision": 0.156,
         "avgMRR": 0.188,
         "passRate": 0.375,
-        "artifactLeakRate": 0.125
+        "artifactLeakRate": 0.25
       },
       "deep": {
         "count": 6,
@@ -1297,10 +1297,10 @@
       },
       "history_temporal": {
         "count": 6,
-        "avgPrecision": 0.125,
+        "avgPrecision": 0.208,
         "avgMRR": 0.083,
         "passRate": 0.333,
-        "artifactLeakRate": 0
+        "artifactLeakRate": 0.167
       },
       "why_explanatory": {
         "count": 3,
@@ -1445,7 +1445,7 @@
         "id": "hybrid-04",
         "intent": "hybrid",
         "route": "history_temporal",
-        "precisionAt5": 0.25,
+        "precisionAt5": 0.75,
         "mrr": 0.5,
         "pass": true,
         "typeMatch": true,
@@ -1575,8 +1575,10 @@
         "precisionAt5": 0,
         "mrr": 0,
         "pass": true,
-        "typeMatch": true,
-        "artifactViolations": [],
+        "typeMatch": false,
+        "artifactViolations": [
+          "term:contextos.db"
+        ],
         "familyCounts": {
           "conversational": 5
         }
