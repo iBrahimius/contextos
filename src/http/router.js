@@ -225,6 +225,11 @@ export async function handleRequest(contextOS, rootDir, request, response) {
       return;
     }
 
+    if (request.method === "GET" && pathname === "/api/alerts/status") {
+      sendJson(response, 200, withGraphVersion(contextOS.getAlertStatus(), resolveGraphVersion(contextOS)));
+      return;
+    }
+
     if (!contextOS.ready && pathname.startsWith("/api/")) {
       sendJson(response, 503, { error: "initializing", ready: false });
       return;
