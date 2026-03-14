@@ -7,6 +7,7 @@ import { embedBatch, embedText } from "./embeddings.js";
 import { EntityGraph } from "./entity-graph.js";
 import { clusterObservations, detectEpisodes, detectTopicClusters } from "./episode-clustering.js";
 import { applyDecayToAllClaims } from "./importance-decay.js";
+import { IncrementalAggregator } from "./incremental-aggregator.js";
 import { InjectionGuard } from "./injection-guard.js";
 import { classifyIntent, INTENT_STRATEGIES } from "./intent-router.js";
 import { CLAIM_TYPE_VALUES, LIFECYCLE_STATES } from "./claim-types.js";
@@ -570,6 +571,7 @@ export class ContextOS {
       graph: this.graph,
       classifier: this.classifier,
     });
+    this.incrementalAggregator = new IncrementalAggregator();
     this.backgroundTasks = new Set();
     this.embeddingTasks = new Map();
     this.startupEmbeddingBackfill = null;
@@ -619,6 +621,83 @@ export class ContextOS {
     }
 
     return this.database.createConversation(title);
+  }
+
+  syncStoredObservation({
+    stored,
+    category,
+    predicate = null,
+    detail,
+    confidence = 0.5,
+    metadata = null,
+    subjectEntityId = null,
+    objectEntityId = null,
+    subjectLabel = null,
+    objectLabel = null,
+  }) {
+    if (!stored?.id) {
+      return stored;
+    }
+
+    if (stored.graphVersion) {
+      this.graph.updateGraphVersion(stored.graphVersion);
+    }
+
+    const resolvedSubjectLabel = subjectLabel ?? this.graph.getEntity(subjectEntityId)?.label ?? null;
+    const resolvedObjectLabel = objectLabel ?? this.graph.getEntity(objectEntityId)?.label ?? null;
+    const entities = [...new Set([
+      normalizeLabel(resolvedSubjectLabel),
+      normalizeLabel(resolvedObjectLabel),
+    ].filter(Boolean))];
+    const topics = [...new Set([
+      normalizeLabel(category),
+      normalizeLabel(predicate),
+      ...((Array.isArray(metadata?.tags) ? metadata.tags : []).map((tag) => normalizeLabel(tag))),
+    ].filter(Boolean))];
+
+    this.incrementalAggregator.ingestObservation({
+      id: stored.id,
+      text: String(detail ?? ""),
+      timestamp: stored.createdAt ?? new Date().toISOString(),
+      confidence: clamp(Number(confidence ?? 0.5), 0, 1),
+      entities,
+      topics,
+    });
+
+    return stored;
+  }
+
+  getIncrementalAggregationData() {
+    const clusters = [...this.incrementalAggregator.clusters.keys()]
+      .sort((left, right) => left - right)
+      .map((clusterId) => {
+        const cluster = this.incrementalAggregator.getClusterMeta(clusterId);
+        if (!cluster) {
+          return null;
+        }
+
+        return {
+          clusterId: cluster.clusterId,
+          observationIds: cluster.observationIds,
+          observationCount: cluster.observationCount,
+          entities: [...cluster.entities],
+          topics: [...cluster.topics],
+          startTime: cluster.startTime?.toISOString() ?? null,
+          endTime: cluster.endTime?.toISOString() ?? null,
+          avgConfidence: cluster.avgConfidence,
+          contradictions: cluster.contradictions,
+          contradictionCount: cluster.contradictions.length,
+          deduplicatedObservationIds: [...this.incrementalAggregator.getDeduplicated(clusterId)],
+        };
+      })
+      .filter(Boolean);
+
+    return {
+      clusterCount: clusters.length,
+      observationCount: clusters.reduce((total, cluster) => total + cluster.observationCount, 0),
+      contradictionCount: clusters.reduce((total, cluster) => total + cluster.contradictionCount, 0),
+      clusters,
+    };
   }
 
   buildGraphContext(limit = 120) {
@@ -749,22 +828,32 @@ export class ContextOS {
         });
       }
 
-      const stored = this.database.insertObservation({
-        conversationId,
-        messageId,
-        actorId,
+      const stored = this.syncStoredObservation({
+        stored: this.database.insertObservation({
+          conversationId,
+          messageId,
+          actorId,
+          category: observation.category,
+          predicate: observation.predicate ?? null,
+          subjectEntityId: subject?.id ?? null,
+          objectEntityId: object?.id ?? null,
+          detail: observation.detail,
+          confidence: observation.confidence,
+          sourceSpan: observation.sourceSpan,
+          metadata: observation.metadata ?? null,
+          scopeKind,
+          scopeId,
+        }),
         category: observation.category,
         predicate: observation.predicate ?? null,
-        subjectEntityId: subject?.id ?? null,
-        objectEntityId: object?.id ?? null,
         detail: observation.detail,
         confidence: observation.confidence,
-        sourceSpan: observation.sourceSpan,
         metadata: observation.metadata ?? null,
-        scopeKind,
-        scopeId,
+        subjectEntityId: subject?.id ?? null,
+        objectEntityId: object?.id ?? null,
+        subjectLabel: subject?.label ?? null,
+        objectLabel: object?.label ?? null,
       });
-      this.graph.updateGraphVersion(stored.graphVersion);
 
       try {
         const claim = ensureClaimForObservation(this.database, {
@@ -2679,22 +2768,32 @@ export class ContextOS {
         provenanceMessageId: sourceMessage.id,
         metadata,
       });
-      const observation = this.database.insertObservation({
-        conversationId: sourceMessage.conversationId,
-        messageId: sourceMessage.id,
-        actorId,
+      const observation = this.syncStoredObservation({
+        stored: this.database.insertObservation({
+          conversationId: sourceMessage.conversationId,
+          messageId: sourceMessage.id,
+          actorId,
+          category: "relationship",
+          predicate,
+          subjectEntityId: subject.id,
+          objectEntityId: object.id,
+          detail,
+          confidence,
+          sourceSpan: detail,
+          metadata,
+          scopeKind,
+          scopeId,
+        }),
         category: "relationship",
         predicate,
-        subjectEntityId: subject.id,
-        objectEntityId: object.id,
         detail,
         confidence,
-        sourceSpan: detail,
         metadata,
-        scopeKind,
-        scopeId,
+        subjectEntityId: subject.id,
+        objectEntityId: object.id,
+        subjectLabel: subject.label,
+        objectLabel: object.label,
       });
-      this.graph.updateGraphVersion(observation.graphVersion);
       this.enqueueObservationEmbedding({
         id: observation.id,
         detail,
@@ -2729,22 +2828,29 @@ export class ContextOS {
       throw new Error(`Unsupported mutation type: ${proposal.proposal_type}`);
     }
 
-    const observation = this.database.insertObservation({
-      conversationId: sourceMessage.conversationId,
-      messageId: sourceMessage.id,
-      actorId,
+    const observation = this.syncStoredObservation({
+      stored: this.database.insertObservation({
+        conversationId: sourceMessage.conversationId,
+        messageId: sourceMessage.id,
+        actorId,
+        category: observationType,
+        predicate: null,
+        subjectEntityId: entity?.id ?? null,
+        objectEntityId: null,
+        detail,
+        confidence,
+        sourceSpan: detail,
+        metadata,
+        scopeKind,
+        scopeId,
+      }),
       category: observationType,
-      predicate: null,
-      subjectEntityId: entity?.id ?? null,
-      objectEntityId: null,
       detail,
       confidence,
-      sourceSpan: detail,
       metadata,
-      scopeKind,
-      scopeId,
+      subjectEntityId: entity?.id ?? null,
+      subjectLabel: entity?.label ?? null,
     });
-    this.graph.updateGraphVersion(observation.graphVersion);
     this.enqueueObservationEmbedding({
       id: observation.id,
       detail,
@@ -3570,6 +3676,10 @@ export class ContextOS {
         .slice(0, 500);
 
       const compressedIds = capped.map((row) => row.id);
+      const summaryMetadata = {
+        compressed_count: capped.length,
+        compressed_from: capped.map((row) => row.id),
+      };
       const { summaryObs, markedCount } = this.database.withTransaction(() => {
         const summaryObs = this.database.insertObservation({
           conversationId: bestRow.conversationId,
@@ -3582,10 +3692,7 @@ export class ContextOS {
           detail: summaryDetail,
           confidence: Number(bestRow.confidence ?? 0.5),
           sourceSpan: null,
-          metadata: {
-            compressed_count: capped.length,
-            compressed_from: capped.map((row) => row.id),
-          },
+          metadata: summaryMetadata,
           scopeKind: bestRow.scopeKind ?? "private",
           scopeId: bestRow.scopeId ?? null,
         });
@@ -3593,7 +3700,18 @@ export class ContextOS {
         this.database.relinkClaimsToObservation(compressedIds, summaryObs.id);
         return { summaryObs, markedCount };
       });
-      this.graph.updateGraphVersion(summaryObs.graphVersion);
+      this.syncStoredObservation({
+        stored: summaryObs,
+        category: bestRow.category,
+        predicate: bestRow.predicate ?? null,
+        detail: summaryDetail,
+        confidence: Number(bestRow.confidence ?? 0.5),
+        metadata: summaryMetadata,
+        subjectEntityId: bestRow.subject_entity_id ?? null,
+        objectEntityId: bestRow.object_entity_id ?? null,
+        subjectLabel: bestRow.subjectLabel ?? null,
+        objectLabel: bestRow.objectLabel ?? null,
+      });
 
       // Enqueue embedding for the summary
       this.enqueueObservationEmbedding({ id: summaryObs.id, detail: summaryDetail });

@@ -241,6 +241,11 @@ export async function handleRequest(contextOS, rootDir, request, response) {
       return;
     }
 
+    if (request.method === "GET" && pathname === "/api/aggregator") {
+      sendJson(response, 200, withGraphVersion(contextOS.getIncrementalAggregationData(), resolveGraphVersion(contextOS)));
+      return;
+    }
+
     if (request.method === "GET" && pathname === "/api/conversations") {
       const conversations = contextOS.database.listConversations(pagination);
       sendJson(

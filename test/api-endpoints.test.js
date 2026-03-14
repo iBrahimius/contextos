@@ -8,6 +8,7 @@ import path from "node:path";
 import { ContextOS } from "../src/core/context-os.js";
 import { estimateTokens } from "../src/core/utils.js";
 import { handleRequest } from "../src/http/router.js";
+import { persistPatchForMessage } from "./test-helpers.js";
 
 async function makeRoot() {
   const root = await fs.mkdtemp(path.join(os.tmpdir(), "contextos-api-"));
@@ -1082,6 +1083,66 @@ test("GET /api/status and /api/health expose registry and observation counts", a
     assert.equal(dashboardResponse.status, 200);
     const dashboardPayload = await dashboardResponse.json();
     assert.deepEqual(dashboardPayload.claims, statusPayload.claims);
+  } finally {
+    await harness.close();
+  }
+});
+
+test("GET /api/aggregator exposes incremental aggregation state for live observations", async () => {
+  const harness = await createHarness();
+
+  try {
+    const capture = await harness.contextOS.ingestMessage({
+      conversationId: harness.seeded.conversation.id,
+      conversationTitle: harness.seeded.conversation.title,
+      role: "user",
+      direction: "inbound",
+      actorId: "user:aggregator",
+      content: "Ibrahim is active, then Ibrahim is inactive.",
+      scopeKind: "project",
+      scopeId: "proj-aggregator",
+    });
+    const storedPatch = persistPatchForMessage(harness.contextOS, capture, {
+      entities: [
+        { label: "Ibrahim", kind: "person" },
+      ],
+      observations: [
+        {
+          category: "fact",
+          subjectLabel: "Ibrahim",
+          detail: "Ibrahim is active",
+          confidence: 0.9,
+          sourceSpan: "Ibrahim is active",
+          metadata: { tags: ["status"] },
+        },
+        {
+          category: "fact",
+          subjectLabel: "Ibrahim",
+          detail: "Ibrahim is inactive",
+          confidence: 0.86,
+          sourceSpan: "Ibrahim is inactive",
+          metadata: { tags: ["status"] },
+        },
+      ],
+      retrieveHints: [],
+      graphProposals: [],
+      complexityAdjustments: [],
+    });
+
+    const response = await fetch(`${harness.baseUrl}/api/aggregator`);
+    assert.equal(response.status, 200);
+    const payload = await response.json();
+
+    assert.equal(payload.clusterCount, 1);
+    assert.equal(payload.observationCount, 2);
+    assert.equal(payload.clusters.length, 1);
+    assert.deepEqual(
+      payload.clusters[0].observationIds.slice().sort(),
+      storedPatch.observations.map((observation) => observation.id).sort(),
+    );
+    assert.ok(payload.clusters[0].entities.includes("Ibrahim"));
+    assert.ok(payload.clusters[0].topics.includes("fact"));
+    assert.ok(payload.clusters[0].topics.includes("status"));
   } finally {
     await harness.close();
   }
