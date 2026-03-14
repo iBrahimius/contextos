@@ -1144,6 +1144,61 @@ test("6.6 LOD compression: episode detection creates summary artifacts", async (
   }
 });
 
+test("ContextOS routes persisted observations into the incremental aggregator", async () => {
+  const harness = await createHarness();
+
+  try {
+    const capture = await createMessage(harness, {
+      content: "Ibrahim is active, then Ibrahim is inactive.",
+      scopeKind: "project",
+      scopeId: "proj-aggregator",
+    });
+    const storedPatch = persistPatchForMessage(harness.contextOS, capture, {
+      entities: [
+        { label: "Ibrahim", kind: "person" },
+      ],
+      observations: [
+        {
+          category: "fact",
+          subjectLabel: "Ibrahim",
+          detail: "Ibrahim is active",
+          confidence: 0.9,
+          sourceSpan: "Ibrahim is active",
+          metadata: { tags: ["status"] },
+        },
+        {
+          category: "fact",
+          subjectLabel: "Ibrahim",
+          detail: "Ibrahim is inactive",
+          confidence: 0.86,
+          sourceSpan: "Ibrahim is inactive",
+          metadata: { tags: ["status"] },
+        },
+      ],
+      retrieveHints: [],
+      graphProposals: [],
+      complexityAdjustments: [],
+    });
+    const aggregation = harness.contextOS.getIncrementalAggregationData();
+
+    assert.equal(aggregation.clusterCount, 1);
+    assert.equal(aggregation.observationCount, 2);
+    assert.equal(aggregation.clusters.length, 1);
+
+    const [cluster] = aggregation.clusters;
+    assert.deepEqual(cluster.observationIds.slice().sort(), storedPatch.observations.map((observation) => observation.id).sort());
+    assert.equal(cluster.observationCount, 2);
+    assert.ok(cluster.entities.includes("Ibrahim"));
+    assert.ok(cluster.topics.includes("fact"));
+    assert.ok(cluster.topics.includes("status"));
+    assert.ok(Math.abs(cluster.avgConfidence - 0.88) < 1e-9);
+    assert.match(cluster.startTime, /^\d{4}-\d{2}-\d{2}T/);
+    assert.match(cluster.endTime, /^\d{4}-\d{2}-\d{2}T/);
+  } finally {
+    await harness.close();
+  }
+});
+
 test("6.6 LOD compression: incremental aggregator detects contradictions", async () => {
   const harness = await createHarness();
 
