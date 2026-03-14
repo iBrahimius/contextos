@@ -1254,22 +1254,22 @@
     ]
   },
   {
-    "timestamp": "2026-03-14T10:46:24.236Z",
+    "timestamp": "2026-03-14T13:02:16.903Z",
     "label": "baseline",
     "queryCount": 22,
-    "avgPrecisionAt5": 0.121,
-    "avgMRR": 0.148,
-    "passRate": 0.273,
+    "avgPrecisionAt5": 0.102,
+    "avgMRR": 0.159,
+    "passRate": 0.227,
     "artifactLeakRate": 0.136,
     "p50LatencyMs": null,
     "p95LatencyMs": null,
-    "totalDurationMs": 3312,
+    "totalDurationMs": 3372,
     "byIntent": {
       "simple": {
         "count": 8,
-        "avgPrecision": 0.094,
-        "avgMRR": 0.042,
-        "passRate": 0.125,
+        "avgPrecision": 0.063,
+        "avgMRR": 0,
+        "passRate": 0,
         "artifactLeakRate": 0
       },
       "hybrid": {
@@ -1281,8 +1281,8 @@
       },
       "deep": {
         "count": 6,
-        "avgPrecision": 0.194,
-        "avgMRR": 0.239,
+        "avgPrecision": 0.167,
+        "avgMRR": 0.333,
         "passRate": 0.333,
         "artifactLeakRate": 0.333
       }
@@ -1297,15 +1297,15 @@
       },
       "history_temporal": {
         "count": 6,
-        "avgPrecision": 0.167,
-        "avgMRR": 0.139,
-        "passRate": 0.5,
+        "avgPrecision": 0.125,
+        "avgMRR": 0.083,
+        "passRate": 0.333,
         "artifactLeakRate": 0
       },
       "why_explanatory": {
         "count": 3,
-        "avgPrecision": 0.389,
-        "avgMRR": 0.478,
+        "avgPrecision": 0.333,
+        "avgMRR": 0.667,
         "passRate": 0.667,
         "artifactLeakRate": 0.667
       },
@@ -1489,10 +1489,10 @@
         "id": "deep-01",
         "intent": "deep",
         "route": "why_explanatory",
-        "precisionAt5": 0.667,
-        "mrr": 0.333,
-        "pass": true,
-        "typeMatch": true,
+        "precisionAt5": 0,
+        "mrr": 0,
+        "pass": false,
+        "typeMatch": false,
         "artifactViolations": [],
         "familyCounts": {
           "conversational": 5
@@ -1502,10 +1502,10 @@
         "id": "deep-02",
         "intent": "deep",
         "route": "why_explanatory",
-        "precisionAt5": 0.5,
+        "precisionAt5": 0.25,
         "mrr": 1,
         "pass": true,
-        "typeMatch": true,
+        "typeMatch": false,
         "artifactViolations": [
           "term:benchmark"
         ],
@@ -1539,14 +1539,12 @@
         "id": "deep-05",
         "intent": "deep",
         "route": "why_explanatory",
-        "precisionAt5": 0,
-        "mrr": 0.1,
-        "pass": false,
+        "precisionAt5": 0.75,
+        "mrr": 1,
+        "pass": true,
         "typeMatch": false,
         "artifactViolations": [
           "term:contextos.db",
-          "term:benchmark",
-          "term:diagnostic",
           "term:audit"
         ],
         "familyCounts": {
@@ -1571,7 +1569,7 @@
         "precisionAt5": 0,
         "mrr": 0,
         "pass": true,
-        "typeMatch": false,
+        "typeMatch": true,
         "artifactViolations": [],
         "familyCounts": {
           "conversational": 5
@@ -1581,9 +1579,9 @@
         "id": "temporal-02",
         "intent": "simple",
         "route": "history_temporal",
-        "precisionAt5": 0.75,
-        "mrr": 0.333,
-        "pass": true,
+        "precisionAt5": 0.5,
+        "mrr": 0,
+        "pass": false,
         "typeMatch": false,
         "artifactViolations": [],
         "familyCounts": {

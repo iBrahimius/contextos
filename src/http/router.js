@@ -164,7 +164,14 @@ function isPaginatedPayload(payload) {
 
 async function serveUiAsset(rootDir, pathname, response, graphVersion) {
   const assetPath = pathname === "/" ? "/index.html" : pathname;
-  const absolutePath = path.join(rootDir, "src", "ui", assetPath);
+  const uiDir = path.resolve(rootDir, "src", "ui");
+  const absolutePath = path.resolve(uiDir, assetPath.replace(/^\/+/, ""));
+
+  // Guard against path traversal (e.g. ../../etc/passwd)
+  if (!absolutePath.startsWith(uiDir + path.sep) && absolutePath !== uiDir) {
+    sendJson(response, 403, withGraphVersion({ error: "Forbidden" }, graphVersion));
+    return;
+  }
 
   try {
     const body = await fs.readFile(absolutePath);
@@ -261,6 +268,14 @@ export async function handleRequest(contextOS, rootDir, request, response) {
         const filePath = path.isAbsolute(requestedPath)
           ? requestedPath
           : path.resolve(rootDir, requestedPath);
+
+        // Restrict file reads to the repo root — prevent arbitrary file access
+        const resolvedRoot = path.resolve(rootDir);
+        if (!filePath.startsWith(resolvedRoot + path.sep) && filePath !== resolvedRoot) {
+          sendJson(response, 403, withGraphVersion({ error: "Path must be within the project root" }, resolveGraphVersion(contextOS)));
+          return;
+        }
+
         const result = await lintRefTagsPath({
           path: filePath,
           database: contextOS.database,
