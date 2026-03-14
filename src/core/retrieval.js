@@ -1093,7 +1093,7 @@ function createRegistryLexicalResults(database, queryText, resolvedScopeFilter) 
       SELECT id, subject_entity_id, object_entity_id, value_text, claim_type, lifecycle_state, importance_score, created_at,
              scope_kind, scope_id
       FROM claims
-      WHERE lifecycle_state IN ('active', 'candidate')
+      WHERE lifecycle_state IN ('active', 'candidate', 'disputed')
       ORDER BY created_at DESC
       LIMIT 4000
     `).all()
@@ -1102,6 +1102,7 @@ function createRegistryLexicalResults(database, queryText, resolvedScopeFilter) 
         type: "claim",
         id: item.id,
         entityId: item.subject_entity_id ?? item.object_entity_id ?? null,
+        lifecycle_state: item.lifecycle_state,
         summary: item.value_text,
         payload: item,
         tokenCount: estimateTokens(item.value_text),
@@ -2564,7 +2565,7 @@ export class RetrievalEngine {
 
     // Apply RRF fusion across signals
     let rrfResults = rrfLists.length > 0
-      ? reciprocalRankFusion(rrfLists, 60)
+      ? reciprocalRankFusion(rrfLists, 25)
       : [];
 
     // Apply category boosts (post-RRF)

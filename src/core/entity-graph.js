@@ -296,7 +296,7 @@ export class EntityGraph {
         const genericSingleTokenExact = singleToken
           && (exactBoundaryMatch || exactSlugMatch)
           && GENERIC_QUERY_ENTITY_LABELS.has(labelTokens[0]);
-        const multiTokenCoverageTooLow = !singleToken && overlap > 0 && coverage < 0.5;
+        const multiTokenCoverageTooLow = !singleToken && overlap > 0 && coverage <= 0.5;
 
         // Suppress meta-concept entity kinds (capability, component)
         const genericKind = GENERIC_ENTITY_KINDS.has(entity.kind);

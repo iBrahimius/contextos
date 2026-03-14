@@ -2128,12 +2128,12 @@ export class ContextDatabase {
       ? entityIds.map((value) => String(value ?? "").trim()).filter(Boolean)
       : [];
     const clauses = [
-      "lifecycle_state = ?",
+      "lifecycle_state IN (?, ?)",
       "superseded_by_claim_id IS NULL",
       "valid_from <= ?",
       "(valid_to IS NULL OR valid_to > ?)",
     ];
-    const params = ["active"];
+    const params = ["active", "disputed"];
     const timestamp = nowIso();
 
     params.push(timestamp, timestamp);

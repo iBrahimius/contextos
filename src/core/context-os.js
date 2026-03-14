@@ -1628,8 +1628,12 @@ export class ContextOS {
       }
 
       const payload = item.payload ?? {};
-      const eventId = payload.message_ingest_id ?? payload.messageIngestId ?? payload.ingestId ?? payload.eventId ?? null;
-      const content = payload.message_content ?? payload.content ?? null;
+      const eventId = payload.message_ingest_id ?? payload.messageIngestId ?? payload.ingestId ?? payload.eventId
+        // Fallback: generate stable eventId from item id for non-message items (claims, registry entries)
+        ?? (item.id ? `synth_${item.id}` : null);
+      const content = payload.message_content ?? payload.content
+        // Fallback: use summary field for items without message content (registryLexical, claims)
+        ?? item.summary ?? payload.value_text ?? payload.detail ?? payload.title ?? null;
       const role = payload.message_role ?? payload.role ?? "system";
       const timestamp = payload.message_captured_at
         ?? payload.captured_at

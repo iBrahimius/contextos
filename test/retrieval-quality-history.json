@@ -1254,37 +1254,37 @@
     ]
   },
   {
-    "timestamp": "2026-03-14T16:31:41.081Z",
+    "timestamp": "2026-03-14T17:36:35.539Z",
     "label": "baseline",
     "queryCount": 22,
-    "avgPrecisionAt5": 0.246,
+    "avgPrecisionAt5": 0.212,
     "avgMRR": 0.295,
     "passRate": 0.364,
-    "artifactLeakRate": 0.227,
+    "artifactLeakRate": 0.318,
     "p50LatencyMs": null,
     "p95LatencyMs": null,
-    "totalDurationMs": 3978,
+    "totalDurationMs": 3461,
     "byIntent": {
       "simple": {
         "count": 8,
-        "avgPrecision": 0.25,
-        "avgMRR": 0.25,
+        "avgPrecision": 0.219,
+        "avgMRR": 0.188,
         "passRate": 0.25,
         "artifactLeakRate": 0.125
       },
       "hybrid": {
         "count": 8,
-        "avgPrecision": 0.156,
+        "avgPrecision": 0.094,
         "avgMRR": 0.25,
         "passRate": 0.375,
-        "artifactLeakRate": 0.25
+        "artifactLeakRate": 0.375
       },
       "deep": {
         "count": 6,
         "avgPrecision": 0.361,
-        "avgMRR": 0.417,
+        "avgMRR": 0.5,
         "passRate": 0.5,
-        "artifactLeakRate": 0.333
+        "artifactLeakRate": 0.5
       }
     },
     "byRoute": {
@@ -1297,17 +1297,17 @@
       },
       "history_temporal": {
         "count": 6,
-        "avgPrecision": 0.292,
-        "avgMRR": 0.333,
+        "avgPrecision": 0.167,
+        "avgMRR": 0.25,
         "passRate": 0.5,
-        "artifactLeakRate": 0.167
+        "artifactLeakRate": 0.333
       },
       "why_explanatory": {
         "count": 3,
         "avgPrecision": 0.722,
-        "avgMRR": 0.833,
+        "avgMRR": 1,
         "passRate": 1,
-        "artifactLeakRate": 0.667
+        "artifactLeakRate": 1
       },
       "entity_state": {
         "count": 3,
@@ -1445,11 +1445,14 @@
         "id": "hybrid-04",
         "intent": "hybrid",
         "route": "history_temporal",
-        "precisionAt5": 0.75,
+        "precisionAt5": 0.25,
         "mrr": 1,
         "pass": true,
         "typeMatch": true,
-        "artifactViolations": [],
+        "artifactViolations": [
+          "term:audit",
+          "term:benchmark"
+        ],
         "familyCounts": {
           "conversational": 5
         }
@@ -1499,7 +1502,9 @@
         "mrr": 1,
         "pass": true,
         "typeMatch": false,
-        "artifactViolations": [],
+        "artifactViolations": [
+          "term:audit"
+        ],
         "familyCounts": {
           "conversational": 5
         }
@@ -1509,10 +1514,11 @@
         "intent": "deep",
         "route": "why_explanatory",
         "precisionAt5": 0.5,
-        "mrr": 0.5,
+        "mrr": 1,
         "pass": true,
-        "typeMatch": true,
+        "typeMatch": false,
         "artifactViolations": [
+          "term:benchmark",
           "term:audit"
         ],
         "familyCounts": {
@@ -1550,6 +1556,9 @@
         "pass": true,
         "typeMatch": false,
         "artifactViolations": [
+          "term:contextos.db",
+          "term:benchmark",
+          "term:diagnostic",
           "term:audit"
         ],
         "familyCounts": {
@@ -1574,9 +1583,9 @@
         "precisionAt5": 0,
         "mrr": 0,
         "pass": true,
-        "typeMatch": true,
+        "typeMatch": false,
         "artifactViolations": [
-          "term:telemetry"
+          "term:contextos.db"
         ],
         "familyCounts": {
           "conversational": 5
@@ -1586,8 +1595,8 @@
         "id": "temporal-02",
         "intent": "simple",
         "route": "history_temporal",
-        "precisionAt5": 1,
-        "mrr": 1,
+        "precisionAt5": 0.75,
+        "mrr": 0.5,
         "pass": true,
         "typeMatch": false,
         "artifactViolations": [],
