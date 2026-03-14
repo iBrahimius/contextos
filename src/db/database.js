@@ -429,6 +429,7 @@ export class ContextDatabase {
     this._stmtMaxSize = 500;
     this.applyIndexMigrations();
     this.backfillObservationFts();
+    this.backfillClaimsFts();
   }
 
   hasTable(tableName) {
@@ -482,6 +483,20 @@ export class ContextDatabase {
       FROM observations o
       LEFT JOIN observation_fts fts ON fts.observation_id = o.id
       WHERE fts.observation_id IS NULL
+    `).run();
+  }
+
+  backfillClaimsFts() {
+    if (!this.hasTable("claims") || !this.hasTable("claims_fts")) {
+      return;
+    }
+
+    this.prepare(`
+      INSERT INTO claims_fts (claim_id, claim_type, content)
+      SELECT c.id, c.claim_type, c.value_text
+      FROM claims c
+      LEFT JOIN claims_fts fts ON fts.claim_id = c.id
+      WHERE fts.claim_id IS NULL AND c.value_text IS NOT NULL
     `).run();
   }
 
@@ -2018,6 +2033,14 @@ export class ContextDatabase {
       normalizeImportanceValue(claim.importance_score ?? claim.importanceScore),
     );
 
+    const valueText = claim.value_text ?? claim.valueText ?? null;
+    if (valueText && this.hasTable("claims_fts")) {
+      this.prepare(`
+        INSERT OR IGNORE INTO claims_fts (claim_id, claim_type, content)
+        VALUES (?, ?, ?)
+      `).run(id, claim.claim_type ?? claim.claimType, valueText);
+    }
+
     return this.getClaim(id);
   }
 
@@ -3258,6 +3281,40 @@ export class ContextDatabase {
       LEFT JOIN entities object ON object.id = o.object_entity_id
       WHERE observation_fts MATCH ?
         AND o.compressed_into IS NULL
+      ORDER BY rank
+      LIMIT 50
+    `)
+      .all(queryText)
+      .filter((row) => scopeMatches(row, scopeFilter, "private"));
+  }
+
+  searchClaimsFts(queryText, scopeFilter = null) {
+    if (!queryText?.trim() || !this.hasTable("claims_fts")) {
+      return [];
+    }
+
+    return this.prepare(`
+      SELECT
+        c.id,
+        c.claim_type,
+        c.value_text,
+        c.lifecycle_state,
+        c.confidence,
+        c.importance_score,
+        c.subject_entity_id,
+        c.object_entity_id,
+        c.predicate,
+        c.scope_kind,
+        c.scope_id,
+        c.created_at,
+        c.valid_from,
+        c.valid_to,
+        bm25(claims_fts) AS rank
+      FROM claims_fts
+      JOIN claims c ON c.id = claims_fts.claim_id
+      WHERE claims_fts MATCH ?
+        AND c.lifecycle_state IN ('active', 'candidate', 'disputed')
+        AND c.superseded_by_claim_id IS NULL
       ORDER BY rank
       LIMIT 50
     `)

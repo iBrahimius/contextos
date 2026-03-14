@@ -281,6 +281,12 @@ CREATE INDEX IF NOT EXISTS idx_claims_lifecycle ON claims(lifecycle_state);
 CREATE INDEX IF NOT EXISTS idx_claims_conversation ON claims(conversation_id);
 CREATE INDEX IF NOT EXISTS idx_claims_valid_time ON claims(valid_from, valid_to);
 
+CREATE VIRTUAL TABLE IF NOT EXISTS claims_fts USING fts5(
+  claim_id UNINDEXED,
+  claim_type UNINDEXED,
+  content
+);
+
 CREATE TABLE IF NOT EXISTS claim_backfill_status (
   observation_id TEXT PRIMARY KEY REFERENCES observations(id) ON DELETE CASCADE,
   status TEXT NOT NULL CHECK (status IN ('claim_created', 'no_claim', 'failed')),

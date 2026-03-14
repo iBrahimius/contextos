@@ -249,19 +249,19 @@ export const RETRIEVAL_ROUTE_PROFILES = {
 
 const ROUTE_SOURCE_KEYS = {
   current_state: {
-    primary: ["claims", "graphCanonical", "registryLexical"],
+    primary: ["claims", "claimsFts", "graphCanonical", "registryLexical"],
     secondary: ["graphConversational", "vectorObservations", "vectorMessages", "ftsConversational"],
   },
   history_temporal: {
     primary: ["graphConversational", "vectorMessages", "vectorObservations", "ftsConversational"],
-    secondary: ["graphCanonical", "claims", "registryLexical"],
+    secondary: ["graphCanonical", "claims", "claimsFts", "registryLexical"],
   },
   why_explanatory: {
-    primary: ["graphConversational", "graphCanonical", "claims", "vectorObservations", "ftsConversational"],
+    primary: ["graphConversational", "graphCanonical", "claims", "claimsFts", "vectorObservations", "ftsConversational"],
     secondary: ["vectorMessages", "registryLexical", "clusterLevels"],
   },
   general: {
-    primary: ["graphCanonical", "claims", "registryLexical", "graphConversational", "vectorObservations"],
+    primary: ["graphCanonical", "claims", "claimsFts", "registryLexical", "graphConversational", "vectorObservations"],
     secondary: ["vectorMessages", "ftsConversational", "clusterLevels"],
   },
 };
@@ -1118,6 +1118,64 @@ function createRegistryLexicalResults(database, queryText, resolvedScopeFilter) 
     .filter((item) => item.score > 0)
     .sort((left, right) => right.score - left.score)
     .slice(0, 60);
+}
+
+/**
+ * Build an FTS5 query from natural language text.
+ * Splits into tokens, removes short stopwords, joins with OR for broad matching.
+ */
+function buildFtsQuery(text) {
+  if (!text?.trim()) {
+    return null;
+  }
+
+  const stopwords = new Set(["a", "an", "the", "is", "are", "was", "were", "be", "been", "being",
+    "have", "has", "had", "do", "does", "did", "will", "would", "could", "should", "may", "might",
+    "shall", "can", "to", "of", "in", "for", "on", "with", "at", "by", "from", "as", "into",
+    "through", "during", "before", "after", "above", "below", "between", "out", "about", "it",
+    "its", "this", "that", "these", "those", "what", "which", "who", "whom", "how", "when",
+    "where", "why", "not", "no", "nor", "and", "or", "but", "if", "then", "so", "than", "too",
+    "very", "just", "also", "i", "me", "my", "we", "our", "you", "your", "he", "him", "his",
+    "she", "her", "they", "them", "their"]);
+
+  const tokens = text.toLowerCase()
+    .replace(/[^a-z0-9\s_-]/g, " ")
+    .split(/\s+/)
+    .filter((t) => t.length >= 2 && !stopwords.has(t));
+
+  if (tokens.length === 0) {
+    return null;
+  }
+
+  // Quote each token to prevent FTS5 syntax issues, join with OR
+  return tokens.map((t) => `"${t}"`).join(" OR ");
+}
+
+function createClaimsFtsResults(database, queryText, resolvedScopeFilter) {
+  if (!queryText?.trim()) {
+    return [];
+  }
+
+  const ftsQuery = buildFtsQuery(queryText);
+  if (!ftsQuery) {
+    return [];
+  }
+
+  try {
+    return database.searchClaimsFts(ftsQuery, resolvedScopeFilter)
+      .map((row) => decorateRetrievalResult({
+        type: "claim",
+        id: row.id,
+        entityId: row.subject_entity_id ?? row.object_entity_id ?? null,
+        lifecycle_state: row.lifecycle_state,
+        summary: row.value_text,
+        payload: row,
+        tokenCount: estimateTokens(row.value_text),
+        hintIds: [],
+      }, "fts"));
+  } catch {
+    return [];
+  }
 }
 
 function normalizeDedupText(text) {
@@ -2535,6 +2593,9 @@ export class RetrievalEngine {
     const claimsResults = this.retrieveClaims(seedEntities, resolvedScopeFilter);
     const registryLexicalResults = createRegistryLexicalResults(this.database, queryText, resolvedScopeFilter);
 
+    // Claims FTS: direct text search on claims (catches unlinked claims missed by entity-based retrieval)
+    const claimsFtsResults = createClaimsFtsResults(this.database, queryText, resolvedScopeFilter);
+
     const sourceLists = {
       graphCanonical: dedupeResults([
         ...entityResults,
@@ -2555,6 +2616,7 @@ export class RetrievalEngine {
       ]),
       clusterLevels: dedupeResults(clusterLevelResults),
       claims: dedupeResults(claimsResults),
+      claimsFts: dedupeResults(claimsFtsResults),
       registryLexical: dedupeResults(registryLexicalResults),
     };
 

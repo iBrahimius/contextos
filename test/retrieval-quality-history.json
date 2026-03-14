@@ -1254,73 +1254,73 @@
     ]
   },
   {
-    "timestamp": "2026-03-14T17:36:35.539Z",
+    "timestamp": "2026-03-14T17:59:31.295Z",
     "label": "baseline",
     "queryCount": 22,
-    "avgPrecisionAt5": 0.212,
-    "avgMRR": 0.295,
-    "passRate": 0.364,
-    "artifactLeakRate": 0.318,
+    "avgPrecisionAt5": 0.318,
+    "avgMRR": 0.523,
+    "passRate": 0.591,
+    "artifactLeakRate": 0.227,
     "p50LatencyMs": null,
     "p95LatencyMs": null,
-    "totalDurationMs": 3461,
+    "totalDurationMs": 4032,
     "byIntent": {
       "simple": {
         "count": 8,
-        "avgPrecision": 0.219,
-        "avgMRR": 0.188,
-        "passRate": 0.25,
+        "avgPrecision": 0.292,
+        "avgMRR": 0.344,
+        "passRate": 0.375,
         "artifactLeakRate": 0.125
       },
       "hybrid": {
         "count": 8,
-        "avgPrecision": 0.094,
-        "avgMRR": 0.25,
-        "passRate": 0.375,
-        "artifactLeakRate": 0.375
+        "avgPrecision": 0.219,
+        "avgMRR": 0.521,
+        "passRate": 0.625,
+        "artifactLeakRate": 0.25
       },
       "deep": {
         "count": 6,
-        "avgPrecision": 0.361,
-        "avgMRR": 0.5,
-        "passRate": 0.5,
-        "artifactLeakRate": 0.5
+        "avgPrecision": 0.486,
+        "avgMRR": 0.767,
+        "passRate": 0.833,
+        "artifactLeakRate": 0.333
       }
     },
     "byRoute": {
       "current_state": {
         "count": 7,
-        "avgPrecision": 0.071,
-        "avgMRR": 0.143,
-        "passRate": 0.143,
+        "avgPrecision": 0.274,
+        "avgMRR": 0.393,
+        "passRate": 0.429,
         "artifactLeakRate": 0.143
       },
       "history_temporal": {
         "count": 6,
-        "avgPrecision": 0.167,
-        "avgMRR": 0.25,
-        "passRate": 0.5,
+        "avgPrecision": 0.306,
+        "avgMRR": 0.528,
+        "passRate": 0.667,
         "artifactLeakRate": 0.333
       },
       "why_explanatory": {
         "count": 3,
         "avgPrecision": 0.722,
-        "avgMRR": 1,
+        "avgMRR": 0.833,
         "passRate": 1,
-        "artifactLeakRate": 1
+        "artifactLeakRate": 0.667
       },
       "entity_state": {
         "count": 3,
-        "avgPrecision": 0.333,
+        "avgPrecision": 0.111,
         "avgMRR": 0.333,
         "passRate": 0.333,
-        "artifactLeakRate": 0.333
+        "artifactLeakRate": 0
       },
       "mixed": {
         "count": 3,
-        "avgPrecision": 0,
-        "avgMRR": 0,
-        "passRate": 0,
+        "avgPrecision": 0.25,
+        "avgMRR": 0.7,
+        "passRate": 0.667,
         "artifactLeakRate": 0
       }
     },
@@ -1330,28 +1330,29 @@
         "intent": "simple",
         "route": "current_state",
         "precisionAt5": 0,
-        "mrr": 0,
+        "mrr": 0.25,
         "pass": false,
         "typeMatch": false,
-        "artifactViolations": [],
-        "familyCounts": {}
+        "artifactViolations": [
+          "term:telemetry",
+          "term:contextos.db",
+          "term:launchd",
+          "term:contextos_telemetry.db"
+        ],
+        "familyCounts": {
+          "canonical": 5
+        }
       },
       {
         "id": "simple-02",
         "intent": "simple",
         "route": "entity_state",
-        "precisionAt5": 1,
-        "mrr": 1,
-        "pass": true,
+        "precisionAt5": 0,
+        "mrr": 0,
+        "pass": false,
         "typeMatch": false,
-        "artifactViolations": [
-          "term:contextos.db",
-          "term:audit",
-          "term:benchmark"
-        ],
-        "familyCounts": {
-          "conversational": 5
-        }
+        "artifactViolations": [],
+        "familyCounts": {}
       },
       {
         "id": "simple-03",
@@ -1362,7 +1363,9 @@
         "pass": false,
         "typeMatch": false,
         "artifactViolations": [],
-        "familyCounts": {}
+        "familyCounts": {
+          "canonical": 5
+        }
       },
       {
         "id": "simple-04",
@@ -1373,29 +1376,35 @@
         "pass": false,
         "typeMatch": false,
         "artifactViolations": [],
-        "familyCounts": {}
+        "familyCounts": {
+          "canonical": 5
+        }
       },
       {
         "id": "simple-05",
         "intent": "simple",
         "route": "entity_state",
-        "precisionAt5": 0,
-        "mrr": 0,
-        "pass": false,
+        "precisionAt5": 0.333,
+        "mrr": 1,
+        "pass": true,
         "typeMatch": false,
         "artifactViolations": [],
-        "familyCounts": {}
+        "familyCounts": {
+          "canonical": 5
+        }
       },
       {
         "id": "simple-06",
         "intent": "simple",
         "route": "current_state",
-        "precisionAt5": 0,
-        "mrr": 0,
-        "pass": false,
+        "precisionAt5": 1,
+        "mrr": 0.5,
+        "pass": true,
         "typeMatch": false,
         "artifactViolations": [],
-        "familyCounts": {}
+        "familyCounts": {
+          "canonical": 5
+        }
       },
       {
         "id": "simple-07",
@@ -1406,40 +1415,50 @@
         "pass": false,
         "typeMatch": false,
         "artifactViolations": [],
-        "familyCounts": {}
+        "familyCounts": {
+          "canonical": 5
+        }
       },
       {
         "id": "hybrid-01",
         "intent": "hybrid",
         "route": "history_temporal",
-        "precisionAt5": 0,
-        "mrr": 0,
-        "pass": false,
+        "precisionAt5": 0.333,
+        "mrr": 1,
+        "pass": true,
         "typeMatch": false,
         "artifactViolations": [],
-        "familyCounts": {}
+        "familyCounts": {
+          "canonical": 5
+        }
       },
       {
         "id": "hybrid-02",
         "intent": "hybrid",
         "route": "current_state",
-        "precisionAt5": 0,
-        "mrr": 0,
-        "pass": false,
+        "precisionAt5": 0.667,
+        "mrr": 1,
+        "pass": true,
         "typeMatch": false,
         "artifactViolations": [],
-        "familyCounts": {}
+        "familyCounts": {
+          "canonical": 5
+        }
       },
       {
         "id": "hybrid-03",
         "intent": "hybrid",
         "route": "history_temporal",
         "precisionAt5": 0,
-        "mrr": 0,
+        "mrr": 0.167,
         "pass": false,
         "typeMatch": false,
-        "artifactViolations": [],
-        "familyCounts": {}
+        "artifactViolations": [
+          "term:audit"
+        ],
+        "familyCounts": {
+          "canonical": 5
+        }
       },
       {
         "id": "hybrid-04",
@@ -1449,10 +1468,7 @@
         "mrr": 1,
         "pass": true,
         "typeMatch": true,
-        "artifactViolations": [
-          "term:audit",
-          "term:benchmark"
-        ],
+        "artifactViolations": [],
         "familyCounts": {
           "conversational": 5
         }
@@ -1461,15 +1477,13 @@
         "id": "hybrid-05",
         "intent": "hybrid",
         "route": "current_state",
-        "precisionAt5": 0.5,
+        "precisionAt5": 0.25,
         "mrr": 1,
         "pass": true,
         "typeMatch": false,
-        "artifactViolations": [
-          "term:telemetry"
-        ],
+        "artifactViolations": [],
         "familyCounts": {
-          "canonical": 2
+          "canonical": 5
         }
       },
       {
@@ -1481,18 +1495,22 @@
         "pass": false,
         "typeMatch": false,
         "artifactViolations": [],
-        "familyCounts": {}
+        "familyCounts": {
+          "canonical": 5
+        }
       },
       {
         "id": "hybrid-07",
         "intent": "hybrid",
         "route": "history_temporal",
-        "precisionAt5": 0,
+        "precisionAt5": 0.25,
         "mrr": 0,
         "pass": false,
         "typeMatch": false,
         "artifactViolations": [],
-        "familyCounts": {}
+        "familyCounts": {
+          "canonical": 5
+        }
       },
       {
         "id": "deep-01",
@@ -1502,9 +1520,7 @@
         "mrr": 1,
         "pass": true,
         "typeMatch": false,
-        "artifactViolations": [
-          "term:audit"
-        ],
+        "artifactViolations": [],
         "familyCounts": {
           "conversational": 5
         }
@@ -1514,11 +1530,10 @@
         "intent": "deep",
         "route": "why_explanatory",
         "precisionAt5": 0.5,
-        "mrr": 1,
+        "mrr": 0.5,
         "pass": true,
-        "typeMatch": false,
+        "typeMatch": true,
         "artifactViolations": [
-          "term:benchmark",
           "term:audit"
         ],
         "familyCounts": {
@@ -1530,22 +1545,26 @@
         "intent": "deep",
         "route": "mixed",
         "precisionAt5": 0,
-        "mrr": 0,
-        "pass": false,
+        "mrr": 1,
+        "pass": true,
         "typeMatch": false,
         "artifactViolations": [],
-        "familyCounts": {}
+        "familyCounts": {
+          "canonical": 5
+        }
       },
       {
         "id": "deep-04",
         "intent": "deep",
         "route": "mixed",
         "precisionAt5": 0,
-        "mrr": 0,
+        "mrr": 0.1,
         "pass": false,
         "typeMatch": false,
         "artifactViolations": [],
-        "familyCounts": {}
+        "familyCounts": {
+          "canonical": 5
+        }
       },
       {
         "id": "deep-05",
@@ -1556,9 +1575,6 @@
         "pass": true,
         "typeMatch": false,
         "artifactViolations": [
-          "term:contextos.db",
-          "term:benchmark",
-          "term:diagnostic",
           "term:audit"
         ],
         "familyCounts": {
@@ -1569,12 +1585,14 @@
         "id": "deep-06",
         "intent": "deep",
         "route": "mixed",
-        "precisionAt5": 0,
-        "mrr": 0,
-        "pass": false,
+        "precisionAt5": 0.75,
+        "mrr": 1,
+        "pass": true,
         "typeMatch": false,
         "artifactViolations": [],
-        "familyCounts": {}
+        "familyCounts": {
+          "canonical": 5
+        }
       },
       {
         "id": "temporal-01",
@@ -1583,9 +1601,9 @@
         "precisionAt5": 0,
         "mrr": 0,
         "pass": true,
-        "typeMatch": false,
+        "typeMatch": true,
         "artifactViolations": [
-          "term:contextos.db"
+          "term:telemetry"
         ],
         "familyCounts": {
           "conversational": 5
@@ -1595,10 +1613,10 @@
         "id": "temporal-02",
         "intent": "simple",
         "route": "history_temporal",
-        "precisionAt5": 0.75,
-        "mrr": 0.5,
+        "precisionAt5": 1,
+        "mrr": 1,
         "pass": true,
-        "typeMatch": false,
+        "typeMatch": true,
         "artifactViolations": [],
         "familyCounts": {
           "conversational": 5
