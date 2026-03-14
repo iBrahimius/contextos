@@ -70,7 +70,7 @@ describe("normalizeKind", () => {
 describe("normalizeLabel", () => {
   it("passes through clean labels", () => {
     assert.equal(normalizeLabel("ContextOS"), "ContextOS");
-    assert.equal(normalizeLabel("Ibrahim"), "Ibrahim");
+    assert.equal(normalizeLabel("Alice"), "Alice");
     assert.equal(normalizeLabel("Haiku classifier"), "Haiku classifier");
     assert.equal(normalizeLabel("Shadow mode"), "Shadow mode");
   });

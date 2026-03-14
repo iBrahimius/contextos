@@ -276,7 +276,7 @@ test("buildWorkingSet filters claims by strategy claim types", async () => {
   const harness = await createHarness();
   try {
     await harness.ingestAndPatch("DNS is on Cloudflare", "decision", "Use Cloudflare for DNS");
-    await harness.ingestAndPatch("Ibrahim prefers dark mode", "fact", "Prefers dark mode");
+    await harness.ingestAndPatch("Alice prefers dark mode", "fact", "Prefers dark mode");
 
     // Strategy that only wants decisions
     const ws = harness.contextOS.buildWorkingSet({

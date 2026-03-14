@@ -53,16 +53,16 @@
     {
       "id": "simple-02",
       "intent": "simple",
-      "query": "Who is Ibrahim?",
-      "rationale": "Entity lookup. Should return Ibrahim entity card with key facts.",
+      "query": "Who is Alice?",
+      "rationale": "Entity lookup. Should return Alice entity card with key facts.",
       "expected_top1_type": "entity",
-      "expected_top1_contains": "Ibrahim",
+      "expected_top1_contains": "Alice",
       "expected_in_top5": [
-        "Ibrahim",
-        "ZeN"
+        "Alice",
+        "ace"
       ],
       "expected_absent": [],
-      "notes": "REVIEW: what facts about Ibrahim should surface in top-5?",
+      "notes": "REVIEW: what facts about Alice should surface in top-5?",
       "route": "entity_state",
       "target_families": {
         "primary": "canonical",
@@ -687,7 +687,7 @@
     {
       "id": "deep-03",
       "intent": "deep",
-      "query": "What is Ibrahim's pattern around shipping public-facing work and how should I handle it?",
+      "query": "What is Alice's pattern around shipping public-facing work and how should I handle it?",
       "rationale": "Behavioral insight. Should surface the visibility anxiety pattern.",
       "expected_top1_type": "fact",
       "expected_top1_contains": "visibility",
@@ -775,7 +775,7 @@
       "id": "deep-05",
       "intent": "deep",
       "query": "What was the reasoning behind the LOD tiered compression design?",
-      "rationale": "Design rationale. Should surface research synthesis + Ibrahim's decisions.",
+      "rationale": "Design rationale. Should surface research synthesis + Alice's decisions.",
       "expected_top1_type": "decision",
       "expected_top1_contains": "LOD",
       "expected_in_top5": [
@@ -951,7 +951,7 @@
     },
     {
       "id": "route-02",
-      "query": "Who is Ibrahim?",
+      "query": "Who is Alice?",
       "expected_route": "entity_state"
     },
     {
@@ -966,7 +966,7 @@
     },
     {
       "id": "route-05",
-      "query": "What is Ibrahim's pattern around shipping public-facing work and how should I handle it?",
+      "query": "What is Alice's pattern around shipping public-facing work and how should I handle it?",
       "expected_route": "mixed"
     },
     {

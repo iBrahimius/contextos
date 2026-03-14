@@ -165,7 +165,7 @@ async function seedAuditDataset(harness) {
 
   const ownerMessage = await createMessage(harness, {
     ingestId: "retrieval_audit_owner_001",
-    content: "Who owns ContextOS? ContextOS is owned by Ibrahim.",
+    content: "Who owns ContextOS? ContextOS is owned by Alice.",
     scopeKind,
     scopeId,
   });
@@ -173,8 +173,8 @@ async function seedAuditDataset(harness) {
     claimType: "fact",
     predicate: "owner",
     subjectEntityId: contextOsEntity.id,
-    valueText: "Ibrahim",
-    detail: "ContextOS is owned by Ibrahim.",
+    valueText: "Alice",
+    detail: "ContextOS is owned by Alice.",
     confidence: 0.96,
     scopeKind,
     scopeId,

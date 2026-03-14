@@ -257,38 +257,38 @@ test("e2e: entity resolution — aliases resolve to the same entity", async () =
   const conversation = ctx.database.createConversation("Entity Resolution");
 
   // Create entity with aliases
-  const ibrahim = ctx.graph.ensureEntity({
-    label: "Ibrahim",
+  const alice = ctx.graph.ensureEntity({
+    label: "Alice",
     kind: "person",
-    aliases: ["ZeN", "idjinn"],
+    aliases: ["ace", "a1pha"],
   });
 
-  assert.ok(ibrahim.id, "entity created");
+  assert.ok(alice.id, "entity created");
 
   // All aliases should resolve to the same entity
-  const byName = ctx.graph.findEntityByLabel("Ibrahim");
-  const byAlias1 = ctx.graph.findEntityByLabel("ZeN");
-  const byAlias2 = ctx.graph.findEntityByLabel("idjinn");
+  const byName = ctx.graph.findEntityByLabel("Alice");
+  const byAlias1 = ctx.graph.findEntityByLabel("ace");
+  const byAlias2 = ctx.graph.findEntityByLabel("a1pha");
 
   assert.ok(byName, "found by primary label");
-  assert.ok(byAlias1, "found by alias ZeN");
-  assert.ok(byAlias2, "found by alias idjinn");
-  assert.equal(byName.id, byAlias1.id, "ZeN resolves to Ibrahim");
-  assert.equal(byName.id, byAlias2.id, "idjinn resolves to Ibrahim");
+  assert.ok(byAlias1, "found by alias ace");
+  assert.ok(byAlias2, "found by alias a1pha");
+  assert.equal(byName.id, byAlias1.id, "ace resolves to Alice");
+  assert.equal(byName.id, byAlias2.id, "a1pha resolves to Alice");
 
   // Insert messages mentioning different aliases
   const msg1 = await ctx.ingestMessage({
     conversationId: conversation.id,
     role: "user",
     direction: "inbound",
-    content: "Ibrahim wants to ship the product this quarter.",
+    content: "Alice wants to ship the product this quarter.",
   });
 
   const msg2 = await ctx.ingestMessage({
     conversationId: conversation.id,
     role: "assistant",
     direction: "outbound",
-    content: "ZeN, I've prepared the launch checklist for you.",
+    content: "ace, I've prepared the launch checklist for you.",
   });
 
   // Create observations linked to the resolved entity
@@ -296,8 +296,8 @@ test("e2e: entity resolution — aliases resolve to the same entity", async () =
     messageId: msg1.message.id,
     conversationId: conversation.id,
     category: "fact",
-    detail: "Ibrahim wants to ship this quarter",
-    subjectEntityId: ibrahim.id,
+    detail: "Alice wants to ship this quarter",
+    subjectEntityId: alice.id,
     scopeKind: "private",
   });
 
@@ -305,21 +305,21 @@ test("e2e: entity resolution — aliases resolve to the same entity", async () =
     messageId: msg2.message.id,
     conversationId: conversation.id,
     category: "fact",
-    detail: "Launch checklist prepared for ZeN",
-    subjectEntityId: ibrahim.id,
+    detail: "Launch checklist prepared for ace",
+    subjectEntityId: alice.id,
     scopeKind: "private",
   });
 
-  // Both observations are linked to the Ibrahim entity
+  // Both observations are linked to the Alice entity
   // Verify via database lookup since insertObservation may not return all fields
   const storedObs1 = ctx.database.getObservation(obs1.id);
   const storedObs2 = ctx.database.getObservation(obs2.id);
-  assert.equal(storedObs1.subject_entity_id, ibrahim.id, "obs1 linked to Ibrahim entity");
-  assert.equal(storedObs2.subject_entity_id, ibrahim.id, "obs2 linked to Ibrahim entity");
+  assert.equal(storedObs1.subject_entity_id, alice.id, "obs1 linked to Alice entity");
+  assert.equal(storedObs2.subject_entity_id, alice.id, "obs2 linked to Alice entity");
 
   // Ensure re-ensuring with same label returns same entity
-  const sameEntity = ctx.graph.ensureEntity({ label: "Ibrahim", kind: "person" });
-  assert.equal(sameEntity.id, ibrahim.id, "ensureEntity is idempotent");
+  const sameEntity = ctx.graph.ensureEntity({ label: "Alice", kind: "person" });
+  assert.equal(sameEntity.id, alice.id, "ensureEntity is idempotent");
 });
 
 // ── Scenario 5: Concurrent write safety ──────────────────────────────
@@ -395,7 +395,7 @@ test("e2e: mutation lifecycle — propose, auto-apply canonical, queue ai_propos
     },
     confidence: 0.95,
     sourceEventId: source.message.ingest_id,
-    actorId: "djinni",
+    actorId: "bot",
   });
 
   assert.ok(decision1.ok, "canonical proposal succeeded");
@@ -423,7 +423,7 @@ test("e2e: mutation lifecycle — propose, auto-apply canonical, queue ai_propos
     action: "apply",
     mutationId: task1.mutation_id,
     reason: "Approved by human review",
-    actorId: "ibrahim",
+    actorId: "alice",
   });
 
   assert.ok(review, "review returned a result");
@@ -438,7 +438,7 @@ test("e2e: mutation lifecycle — propose, auto-apply canonical, queue ai_propos
     },
     confidence: 0.9,
     sourceEventId: source.message.ingest_id,
-    actorId: "djinni",
+    actorId: "bot",
   });
 
   assert.ok(decision2.ok, "second decision proposal succeeded");

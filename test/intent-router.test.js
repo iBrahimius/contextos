@@ -69,7 +69,7 @@ const GOLDEN_SET = [
 
   // entity-briefing
   { query: "Tell me about RHI", expected: "entity-briefing" },
-  { query: "What do we know about Ibrahim?", expected: "entity-briefing" },
+  { query: "What do we know about Alice?", expected: "entity-briefing" },
   { query: "Overview of ContextOS", expected: "entity-briefing" },
   { query: "Brief on the dashboard project", expected: "entity-briefing" },
 
@@ -130,7 +130,7 @@ test("classifyIntent returns general/default for null query", async () => {
 // --- classifyIntent: entity match ---
 
 test("classifyIntent detects entity-briefing via entity graph match", async () => {
-  const graph = mockEntityGraph(["RHI", "ContextOS", "Ibrahim"]);
+  const graph = mockEntityGraph(["RHI", "ContextOS", "Alice"]);
   const result = await classifyIntent("RHI partner situation", graph, null);
   assert.equal(result.intent, "entity-briefing");
   assert.equal(result.source, "entity-match");
@@ -148,8 +148,8 @@ test("classifyIntent does not match partial entity names below threshold", async
 test("classifyIntent falls back to Haiku when no rule matches", async () => {
   const graph = mockEntityGraph([]);
   const llm = mockLlmClassifier({ intent: "why" });
-  // "Ibrahim's preferences" doesn't match any rule pattern
-  const result = await classifyIntent("Ibrahim's preferences", graph, llm);
+  // "Alice's preferences" doesn't match any rule pattern
+  const result = await classifyIntent("Alice's preferences", graph, llm);
   // Could be haiku or entity-match depending on graph — with empty graph, should be haiku
   assert.ok(["haiku", "general"].includes(result.source) || result.source === "default");
 });

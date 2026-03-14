@@ -1098,29 +1098,29 @@ test("GET /api/aggregator exposes incremental aggregation state for live observa
       role: "user",
       direction: "inbound",
       actorId: "user:aggregator",
-      content: "Ibrahim is active, then Ibrahim is inactive.",
+      content: "Alice is active, then Alice is inactive.",
       scopeKind: "project",
       scopeId: "proj-aggregator",
     });
     const storedPatch = persistPatchForMessage(harness.contextOS, capture, {
       entities: [
-        { label: "Ibrahim", kind: "person" },
+        { label: "Alice", kind: "person" },
       ],
       observations: [
         {
           category: "fact",
-          subjectLabel: "Ibrahim",
-          detail: "Ibrahim is active",
+          subjectLabel: "Alice",
+          detail: "Alice is active",
           confidence: 0.9,
-          sourceSpan: "Ibrahim is active",
+          sourceSpan: "Alice is active",
           metadata: { tags: ["status"] },
         },
         {
           category: "fact",
-          subjectLabel: "Ibrahim",
-          detail: "Ibrahim is inactive",
+          subjectLabel: "Alice",
+          detail: "Alice is inactive",
           confidence: 0.86,
-          sourceSpan: "Ibrahim is inactive",
+          sourceSpan: "Alice is inactive",
           metadata: { tags: ["status"] },
         },
       ],
@@ -1140,7 +1140,7 @@ test("GET /api/aggregator exposes incremental aggregation state for live observa
       payload.clusters[0].observationIds.slice().sort(),
       storedPatch.observations.map((observation) => observation.id).sort(),
     );
-    assert.ok(payload.clusters[0].entities.includes("Ibrahim"));
+    assert.ok(payload.clusters[0].entities.includes("Alice"));
     assert.ok(payload.clusters[0].topics.includes("fact"));
     assert.ok(payload.clusters[0].topics.includes("status"));
   } finally {

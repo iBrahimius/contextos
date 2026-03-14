@@ -14,6 +14,7 @@ const CONTENT_TYPES = {
   ".svg": "image/svg+xml",
 };
 const CORS_ALLOW_HEADERS = "content-type, authorization";
+const CORS_ORIGIN = process.env.CONTEXTOS_CORS_ORIGIN || "*";
 const MAX_BODY_BYTES = 1_048_576; // 1 MB
 const MAX_PAGE_SIZE = 100;
 
@@ -66,7 +67,7 @@ function enrichClaimTruth(contextOS, claim) {
 
 function sendJson(response, statusCode, payload) {
   response.writeHead(statusCode, {
-    "Access-Control-Allow-Origin": "*",
+    "Access-Control-Allow-Origin": CORS_ORIGIN,
     "Access-Control-Allow-Headers": CORS_ALLOW_HEADERS,
     "Access-Control-Allow-Methods": "GET,POST,PATCH,OPTIONS",
     "Content-Type": "application/json; charset=utf-8",
@@ -76,7 +77,7 @@ function sendJson(response, statusCode, payload) {
 
 function sendFile(response, statusCode, body, contentType) {
   response.writeHead(statusCode, {
-    "Access-Control-Allow-Origin": "*",
+    "Access-Control-Allow-Origin": CORS_ORIGIN,
     "Content-Type": contentType,
   });
   response.end(body);
@@ -185,7 +186,7 @@ async function serveUiAsset(rootDir, pathname, response, graphVersion) {
 export async function handleRequest(contextOS, rootDir, request, response) {
   if (request.method === "OPTIONS") {
     response.writeHead(204, {
-      "Access-Control-Allow-Origin": "*",
+      "Access-Control-Allow-Origin": CORS_ORIGIN,
       "Access-Control-Allow-Headers": CORS_ALLOW_HEADERS,
       "Access-Control-Allow-Methods": "GET,POST,PATCH,OPTIONS",
     });
