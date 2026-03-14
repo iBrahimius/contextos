@@ -24,11 +24,10 @@ function cleanupLock() {
   } catch { /* already gone */ }
 }
 process.on("exit", cleanupLock);
-process.on("SIGINT", () => { cleanupLock(); process.exit(0); });
-process.on("SIGTERM", () => { cleanupLock(); process.exit(0); });
 // --- end lockfile ---
 
 const contextOS = new ContextOS({ rootDir, deferInit: true });
+let shuttingDown = false;
 
 const server = http.createServer((request, response) => {
   handleRequest(contextOS, rootDir, request, response).catch((error) => {
@@ -36,6 +35,45 @@ const server = http.createServer((request, response) => {
       "Content-Type": "application/json; charset=utf-8",
     });
     response.end(JSON.stringify({ error: error.message, stack: error.stack }, null, 2));
+  });
+});
+
+async function shutdown(signal) {
+  if (shuttingDown) {
+    return;
+  }
+
+  shuttingDown = true;
+  cleanupLock();
+
+  try {
+    await new Promise((resolve) => {
+      server.close(() => resolve());
+    });
+  } catch {
+    // Ignore close races during shutdown.
+  }
+
+  try {
+    await contextOS.close();
+  } catch (error) {
+    console.error(`ContextOS shutdown failed after ${signal}:`, error.message);
+    process.exitCode = 1;
+  } finally {
+    process.exit();
+  }
+}
+
+process.on("SIGINT", () => {
+  shutdown("SIGINT").catch((error) => {
+    console.error("SIGINT shutdown failed:", error.message);
+    process.exit(1);
+  });
+});
+process.on("SIGTERM", () => {
+  shutdown("SIGTERM").catch((error) => {
+    console.error("SIGTERM shutdown failed:", error.message);
+    process.exit(1);
   });
 });
 

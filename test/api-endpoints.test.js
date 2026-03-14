@@ -278,7 +278,19 @@ function seedApiData(contextOS) {
 
 async function createHarness() {
   const rootDir = await makeRoot();
-  const contextOS = new ContextOS({ rootDir });
+  const contextOS = new ContextOS({
+    rootDir,
+    autoBackfillEmbeddings: false,
+    reviewManagerOptions: {
+      setTimeout() {
+        return {
+          unref() {},
+        };
+      },
+      clearTimeout() {},
+    },
+  });
+  contextOS.reviewManager.start();
   const seeded = seedApiData(contextOS);
   const server = http.createServer((request, response) => handleRequest(contextOS, rootDir, request, response));
 
@@ -957,6 +969,55 @@ test("POST /api/mutations/review rejects unsafe explicit-id batch payloads deter
 
     const untouchedProposal = harness.contextOS.database.getGraphProposal(firstProposal.proposal_id);
     assert.equal(untouchedProposal.status, "proposed");
+  } finally {
+    await harness.close();
+  }
+});
+
+test("GET /api/review/status and POST /api/review/trigger expose automated review state", async () => {
+  const harness = await createHarness();
+
+  try {
+    const proposal = await fetch(`${harness.baseUrl}/api/mutations/propose`, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({
+        type: "add_task",
+        payload: {
+          title: "Review manager endpoint task",
+          status: "active",
+        },
+        confidence: 0.79,
+        source_event_id: harness.seeded.mutationSourceMessage.ingestId,
+      }),
+    }).then((response) => response.json());
+
+    assert.equal(proposal.status, "proposed");
+
+    const statusResponse = await fetch(`${harness.baseUrl}/api/review/status`);
+    assert.equal(statusResponse.status, 200);
+    const statusPayload = await statusResponse.json();
+    assert.equal(statusPayload.started, true);
+    assert.equal(statusPayload.pending_queue_total >= 1, true);
+    assert.equal(statusPayload.mutations_since_last_review >= 1, true);
+    assert.equal(statusPayload.review_in_progress, false);
+
+    const triggerResponse = await fetch(`${harness.baseUrl}/api/review/trigger`, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({
+        reason: "api_manual_review",
+      }),
+    });
+    assert.equal(triggerResponse.status, 200);
+    const triggerPayload = await triggerResponse.json();
+    assert.equal(triggerPayload.status, "completed");
+    assert.equal(triggerPayload.trigger.reason, "api_manual_review");
+    assert.equal(triggerPayload.review.action, "pass_through");
+    assert.equal(triggerPayload.review.reviewed_total >= 1, true);
+    assert.ok(triggerPayload.review_state.last_review_at);
+    assert.equal(triggerPayload.review_state.review_in_progress, false);
+    assert.equal(triggerPayload.review_state.mutations_since_last_review, 0);
   } finally {
     await harness.close();
   }
