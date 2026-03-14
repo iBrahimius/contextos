@@ -172,6 +172,21 @@ CREATE VIRTUAL TABLE IF NOT EXISTS cluster_level_fts USING fts5(
   level UNINDEXED
 );
 
+-- ── Cluster Atoms (v2.4) ───────────────────────────────────────────
+
+CREATE TABLE IF NOT EXISTS cluster_atoms (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  cluster_id TEXT NOT NULL REFERENCES observation_clusters(id) ON DELETE CASCADE,
+  atom_type TEXT NOT NULL,
+  text TEXT NOT NULL,
+  source_observation_ids JSON,
+  confidence REAL NOT NULL DEFAULT 0.5,
+  created_at TEXT NOT NULL DEFAULT (datetime('now'))
+);
+
+CREATE INDEX IF NOT EXISTS idx_cluster_atoms_cluster ON cluster_atoms(cluster_id);
+CREATE INDEX IF NOT EXISTS idx_cluster_atoms_type ON cluster_atoms(atom_type);
+
 CREATE TABLE IF NOT EXISTS tasks (
   id TEXT PRIMARY KEY,
   observation_id TEXT NOT NULL REFERENCES observations(id) ON DELETE CASCADE,
