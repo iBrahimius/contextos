@@ -17,6 +17,7 @@ import { detectPatterns } from "./pattern-detection.js";
 import { CLAIM_TYPE_VALUES, LIFECYCLE_STATES } from "./claim-types.js";
 import { normalizeLabel, validateKnowledgePatch } from "./knowledge-patch.js";
 import { PreconsciousBuffer } from "./preconscious.js";
+import { PushAlerter } from "./push-alerter.js";
 import { RetrievalEngine } from "./retrieval.js";
 import { ReviewManager } from "./review-manager.js";
 import { VectorIndex } from "./vector-index.js";
@@ -563,6 +564,9 @@ export class ContextOS {
     deferInit = false,
     reviewManagerOptions = {},
     llmClient = createLLMClient(),
+    sendAlert,
+    alerting = {},
+    pushAlerter = null,
   }) {
     this.rootDir = rootDir;
     this.database = new ContextDatabase(path.join(rootDir, "data", "contextos.db"));
@@ -593,6 +597,10 @@ export class ContextOS {
     this.backgroundTasks = new Set();
     this.embeddingTasks = new Map();
     this.startupEmbeddingBackfill = null;
+    this.alerter = pushAlerter ?? new PushAlerter({
+      sendAlert,
+      ...alerting,
+    });
     // Monitoring counters (in-memory)
     this._packetsByIntent = {};
     this._briefsAssembled = 0;
@@ -611,26 +619,53 @@ export class ContextOS {
     this._autoBackfillEmbeddings = autoBackfillEmbeddings;
     this.ready = false;
     if (!deferInit) {
-      this.graph.load();
-      this._rebuildVectorIndex();
-      if (autoBackfillEmbeddings) {
-        this.startEmbeddingBackfill();
+      try {
+        this.performStartup();
+      } catch (error) {
+        void this.alerter.startupFailed(error, {
+          metadata: {
+            phase: "constructor",
+          },
+        });
+        throw error;
       }
-      this.ready = true;
     }
+  }
+
+  performStartup({ startReviewManager = false } = {}) {
+    this.graph.load();
+    this._rebuildVectorIndex();
+    if (this._autoBackfillEmbeddings) {
+      this.startEmbeddingBackfill();
+    }
+    if (startReviewManager) {
+      this.reviewManager.start();
+    }
+    this.ready = true;
+    const counts = this.database.getDashboardStats().counts;
+    const registries = this.database.getRegistryCounts();
+    void this.alerter.startupOk(counts.messages ?? 0, registries.pendingMutations ?? 0, {
+      metadata: {
+        reviewManagerStarted: startReviewManager,
+      },
+    });
   }
 
   async init() {
     if (this.ready) {
       return;
     }
-    this.graph.load();
-    this._rebuildVectorIndex();
-    if (this._autoBackfillEmbeddings) {
-      this.startEmbeddingBackfill();
+
+    try {
+      this.performStartup({ startReviewManager: true });
+    } catch (error) {
+      void this.alerter.startupFailed(error, {
+        metadata: {
+          phase: "init",
+        },
+      });
+      throw error;
     }
-    this.reviewManager.start();
-    this.ready = true;
   }
 
   ensureConversation({ conversationId = null, title = "ContextOS Session" } = {}) {
@@ -900,10 +935,17 @@ export class ContextOS {
   }
 
   buildHeuristicPatch(content) {
-    return validateKnowledgePatch(this.classifier.classifyText(content));
+    try {
+      return validateKnowledgePatch(this.classifier.classifyText(content));
+    } catch (error) {
+      void this.alerter.classificationFailed("build_heuristic_patch", error, {
+        metadata: {
+          contentPreview: String(content ?? "").slice(0, 200),
+        },
+      });
+      throw error;
+    }
   }
-
-
 
   resolveEntityReference(entitiesByLabel, label) {
     const key = lowerKey(label);
@@ -930,246 +972,267 @@ export class ContextOS {
     scopeKind = "private",
     scopeId = null,
   }) {
-    const entitiesByLabel = new Map();
+    try {
+      const entitiesByLabel = new Map();
 
-    for (const entity of patch.entities) {
-      const resolved = this.graph.ensureEntity(entity);
-      entitiesByLabel.set(resolved.label.toLowerCase(), resolved);
-      entitiesByLabel.set(entity.label.toLowerCase(), resolved);
-      for (const alias of entity.aliases ?? []) {
-        entitiesByLabel.set(alias.toLowerCase(), resolved);
+      for (const entity of patch.entities) {
+        const resolved = this.graph.ensureEntity(entity);
+        entitiesByLabel.set(resolved.label.toLowerCase(), resolved);
+        entitiesByLabel.set(entity.label.toLowerCase(), resolved);
+        for (const alias of entity.aliases ?? []) {
+          entitiesByLabel.set(alias.toLowerCase(), resolved);
+        }
       }
-    }
 
-    const observationRecords = [];
-    const graphProposalIds = [];
-    const retrievalHintIds = [];
-    const claimStats = {
-      created: 0,
-      errors: [],
-    };
+      const observationRecords = [];
+      const graphProposalIds = [];
+      const retrievalHintIds = [];
+      const claimStats = {
+        created: 0,
+        errors: [],
+      };
 
-    for (const proposal of patch.graphProposals) {
-      const storedProposal = this.database.insertGraphProposal({
-        conversationId,
-        messageId,
-        sourceRunId: modelRuns.predictExpansion ?? modelRuns.extractTurn ?? null,
-        actorId,
-        scopeKind,
-        scopeId,
-        proposalType: proposal.proposalType ?? proposal.category ?? "relationship",
-        subjectLabel: proposal.subjectLabel,
-        predicate: proposal.predicate,
-        objectLabel: proposal.objectLabel,
-        detail: proposal.detail,
-        confidence: proposal.confidence,
-        reason: proposal.reason,
-        payload: proposal.payload ?? proposal,
-      });
-      this.graph.updateGraphVersion(storedProposal.graphVersion);
-      graphProposalIds.push(storedProposal.id);
-    }
-
-    for (const observation of patch.observations) {
-      if (observation.confidence < AI_AUTO_APPLY_CONFIDENCE_THRESHOLD) {
+      for (const proposal of patch.graphProposals) {
         const storedProposal = this.database.insertGraphProposal({
           conversationId,
           messageId,
-          sourceRunId: modelRuns.extractTurn ?? null,
+          sourceRunId: modelRuns.predictExpansion ?? modelRuns.extractTurn ?? null,
           actorId,
           scopeKind,
           scopeId,
-          proposalType: observation.category,
-          subjectLabel: observation.subjectLabel,
-          predicate: observation.predicate,
-          objectLabel: observation.objectLabel,
-          detail: observation.detail,
-          confidence: observation.confidence,
-          reason: "Confidence below auto-apply threshold",
-          payload: observation,
+          proposalType: proposal.proposalType ?? proposal.category ?? "relationship",
+          subjectLabel: proposal.subjectLabel,
+          predicate: proposal.predicate,
+          objectLabel: proposal.objectLabel,
+          detail: proposal.detail,
+          confidence: proposal.confidence,
+          reason: proposal.reason,
+          payload: proposal.payload ?? proposal,
         });
         this.graph.updateGraphVersion(storedProposal.graphVersion);
         graphProposalIds.push(storedProposal.id);
-        continue;
       }
 
-      const subject = this.resolveEntityReference(entitiesByLabel, observation.subjectLabel);
-      const object = this.resolveEntityReference(entitiesByLabel, observation.objectLabel);
+      for (const observation of patch.observations) {
+        if (observation.confidence < AI_AUTO_APPLY_CONFIDENCE_THRESHOLD) {
+          const storedProposal = this.database.insertGraphProposal({
+            conversationId,
+            messageId,
+            sourceRunId: modelRuns.extractTurn ?? null,
+            actorId,
+            scopeKind,
+            scopeId,
+            proposalType: observation.category,
+            subjectLabel: observation.subjectLabel,
+            predicate: observation.predicate,
+            objectLabel: observation.objectLabel,
+            detail: observation.detail,
+            confidence: observation.confidence,
+            reason: "Confidence below auto-apply threshold",
+            payload: observation,
+          });
+          this.graph.updateGraphVersion(storedProposal.graphVersion);
+          graphProposalIds.push(storedProposal.id);
+          continue;
+        }
 
-      if (observation.category === "relationship" && subject && object) {
-        this.graph.connect({
-          subjectEntityId: subject.id,
-          predicate: observation.predicate,
-          objectEntityId: object.id,
-          weight: observation.confidence,
-          provenanceMessageId: messageId,
-          metadata: {
-            source: "model_patch",
-            span: observation.sourceSpan,
-          },
+        const subject = this.resolveEntityReference(entitiesByLabel, observation.subjectLabel);
+        const object = this.resolveEntityReference(entitiesByLabel, observation.objectLabel);
+
+        if (observation.category === "relationship" && subject && object) {
+          this.graph.connect({
+            subjectEntityId: subject.id,
+            predicate: observation.predicate,
+            objectEntityId: object.id,
+            weight: observation.confidence,
+            provenanceMessageId: messageId,
+            metadata: {
+              source: "model_patch",
+              span: observation.sourceSpan,
+            },
+          });
+        }
+
+        const stored = this.syncStoredObservation({
+          stored: this.database.insertObservation({
+            conversationId,
+            messageId,
+            actorId,
+            category: observation.category,
+            predicate: observation.predicate ?? null,
+            subjectEntityId: subject?.id ?? null,
+            objectEntityId: object?.id ?? null,
+            detail: observation.detail,
+            confidence: observation.confidence,
+            sourceSpan: observation.sourceSpan,
+            metadata: observation.metadata ?? null,
+            scopeKind,
+            scopeId,
+          }),
+          category: observation.category,
+          predicate: observation.predicate ?? null,
+          detail: observation.detail,
+          confidence: observation.confidence,
+          metadata: observation.metadata ?? null,
+          subjectEntityId: subject?.id ?? null,
+          objectEntityId: object?.id ?? null,
+          subjectLabel: subject?.label ?? null,
+          objectLabel: object?.label ?? null,
+        });
+
+        try {
+          const claim = ensureClaimForObservation(this.database, {
+            id: stored.id,
+            conversation_id: conversationId,
+            message_id: messageId,
+            actor_id: actorId,
+            category: observation.category,
+            predicate: observation.predicate ?? null,
+            subject_entity_id: subject?.id ?? null,
+            object_entity_id: object?.id ?? null,
+            detail: observation.detail,
+            confidence: observation.confidence,
+            scope_kind: scopeKind,
+            scope_id: scopeId,
+            created_at: stored.createdAt,
+          });
+
+          if (claim?.id) {
+            claimStats.created += 1;
+            // v2.3: check salience and push to preconscious buffer if triggered
+            const alert = this.checkSalience({
+              type: "create",
+              claim_type: observation.category,
+              predicate: observation.predicate ?? null,
+              metadata: observation.metadata ?? {},
+              lifecycle_state: claim.lifecycle_state ?? "candidate",
+              entity_label: subject?.label ?? null,
+              detail: observation.detail,
+              claim_id: claim.id,
+            });
+            if (alert) {
+              this.preconsciousBuffer.push(alert);
+            }
+          }
+        } catch (error) {
+          console.warn(
+            `[claims] Failed to create claim for observation ${stored.id}: ${error.message}`,
+            error,
+          );
+          void this.alerter.pipelineError("claim_creation", error, {
+            key: `pipeline:claim_creation:${stored.id}`,
+            metadata: {
+              conversationId,
+              messageId,
+              observationId: stored.id,
+            },
+          });
+          claimStats.errors.push({
+            observationId: stored.id,
+            message: error.message,
+          });
+        }
+
+        if (observation.category === "task") {
+          this.database.insertTask({
+            observationId: stored.id,
+            entityId: subject?.id ?? object?.id ?? null,
+            title: observation.detail,
+            priority: observation.metadata?.priority ?? "medium",
+            status: "open",
+          });
+        }
+
+        if (observation.category === "decision") {
+          this.database.insertDecision({
+            observationId: stored.id,
+            entityId: subject?.id ?? object?.id ?? null,
+            title: observation.detail,
+            rationale: observation.metadata?.rationale ?? null,
+          });
+        }
+
+        if (observation.category === "constraint") {
+          this.database.insertConstraint({
+            observationId: stored.id,
+            entityId: subject?.id ?? object?.id ?? null,
+            detail: observation.detail,
+            severity: observation.metadata?.severity ?? "high",
+          });
+        }
+
+        if (observation.category === "fact") {
+          this.database.insertFact({
+            observationId: stored.id,
+            entityId: subject?.id ?? object?.id ?? null,
+            detail: observation.detail,
+          });
+        }
+
+        observationRecords.push({
+          ...observation,
+          id: stored.id,
+          subjectEntityId: subject?.id ?? null,
+          objectEntityId: object?.id ?? null,
+        });
+        this.enqueueObservationEmbedding({
+          id: stored.id,
+          detail: observation.detail,
         });
       }
 
-      const stored = this.syncStoredObservation({
-        stored: this.database.insertObservation({
+      for (const hint of patch.retrieveHints) {
+        const seed = this.resolveEntityReference(entitiesByLabel, hint.seed);
+        const expandTo = this.resolveEntityReference(entitiesByLabel, hint.expandTo);
+        const storedHint = this.telemetry.insertRetrievalHint({
+          conversationId,
+          messageId,
+          sourceRunId: modelRuns.predictExpansion ?? null,
+          actorId,
+          seedEntityId: seed?.id ?? null,
+          seedLabel: seed?.label ?? hint.seed,
+          expandEntityId: expandTo?.id ?? null,
+          expandLabel: expandTo?.label ?? hint.expandTo,
+          reason: hint.reason,
+          weight: hint.weight,
+          ttlTurns: hint.ttlTurns,
+        });
+        retrievalHintIds.push(storedHint.id);
+      }
+
+      for (const adjustment of patch.complexityAdjustments) {
+        const entity = this.resolveEntityReference(entitiesByLabel, adjustment.entity);
+        if (entity) {
+          this.graph.adjustComplexity(entity.id, adjustment.delta, adjustment.missIncrement ?? 0);
+        }
+      }
+
+      if (graphProposalIds.length) {
+        this.reviewManager.noteQueuedMutations({
+          count: graphProposalIds.length,
+          source: "persist_knowledge_patch",
+        });
+      }
+
+      return {
+        entities: [...new Set([...entitiesByLabel.values()])],
+        observations: observationRecords,
+        claimStats,
+        retrievalHintIds,
+        graphProposalIds,
+      };
+    } catch (error) {
+      void this.alerter.pipelineError("persist_knowledge_patch", error, {
+        metadata: {
           conversationId,
           messageId,
           actorId,
-          category: observation.category,
-          predicate: observation.predicate ?? null,
-          subjectEntityId: subject?.id ?? null,
-          objectEntityId: object?.id ?? null,
-          detail: observation.detail,
-          confidence: observation.confidence,
-          sourceSpan: observation.sourceSpan,
-          metadata: observation.metadata ?? null,
           scopeKind,
           scopeId,
-        }),
-        category: observation.category,
-        predicate: observation.predicate ?? null,
-        detail: observation.detail,
-        confidence: observation.confidence,
-        metadata: observation.metadata ?? null,
-        subjectEntityId: subject?.id ?? null,
-        objectEntityId: object?.id ?? null,
-        subjectLabel: subject?.label ?? null,
-        objectLabel: object?.label ?? null,
+        },
       });
-
-      try {
-        const claim = ensureClaimForObservation(this.database, {
-          id: stored.id,
-          conversation_id: conversationId,
-          message_id: messageId,
-          actor_id: actorId,
-          category: observation.category,
-          predicate: observation.predicate ?? null,
-          subject_entity_id: subject?.id ?? null,
-          object_entity_id: object?.id ?? null,
-          detail: observation.detail,
-          confidence: observation.confidence,
-          scope_kind: scopeKind,
-          scope_id: scopeId,
-          created_at: stored.createdAt,
-        });
-
-        if (claim?.id) {
-          claimStats.created += 1;
-          // v2.3: check salience and push to preconscious buffer if triggered
-          const alert = this.checkSalience({
-            type: "create",
-            claim_type: observation.category,
-            predicate: observation.predicate ?? null,
-            metadata: observation.metadata ?? {},
-            lifecycle_state: claim.lifecycle_state ?? "candidate",
-            entity_label: subject?.label ?? null,
-            detail: observation.detail,
-            claim_id: claim.id,
-          });
-          if (alert) {
-            this.preconsciousBuffer.push(alert);
-          }
-        }
-      } catch (error) {
-        console.warn(
-          `[claims] Failed to create claim for observation ${stored.id}: ${error.message}`,
-          error,
-        );
-        claimStats.errors.push({
-          observationId: stored.id,
-          message: error.message,
-        });
-      }
-
-      if (observation.category === "task") {
-        this.database.insertTask({
-          observationId: stored.id,
-          entityId: subject?.id ?? object?.id ?? null,
-          title: observation.detail,
-          priority: observation.metadata?.priority ?? "medium",
-          status: "open",
-        });
-      }
-
-      if (observation.category === "decision") {
-        this.database.insertDecision({
-          observationId: stored.id,
-          entityId: subject?.id ?? object?.id ?? null,
-          title: observation.detail,
-          rationale: observation.metadata?.rationale ?? null,
-        });
-      }
-
-      if (observation.category === "constraint") {
-        this.database.insertConstraint({
-          observationId: stored.id,
-          entityId: subject?.id ?? object?.id ?? null,
-          detail: observation.detail,
-          severity: observation.metadata?.severity ?? "high",
-        });
-      }
-
-      if (observation.category === "fact") {
-        this.database.insertFact({
-          observationId: stored.id,
-          entityId: subject?.id ?? object?.id ?? null,
-          detail: observation.detail,
-        });
-      }
-
-      observationRecords.push({
-        ...observation,
-        id: stored.id,
-        subjectEntityId: subject?.id ?? null,
-        objectEntityId: object?.id ?? null,
-      });
-      this.enqueueObservationEmbedding({
-        id: stored.id,
-        detail: observation.detail,
-      });
+      throw error;
     }
-
-    for (const hint of patch.retrieveHints) {
-      const seed = this.resolveEntityReference(entitiesByLabel, hint.seed);
-      const expandTo = this.resolveEntityReference(entitiesByLabel, hint.expandTo);
-      const storedHint = this.telemetry.insertRetrievalHint({
-        conversationId,
-        messageId,
-        sourceRunId: modelRuns.predictExpansion ?? null,
-        actorId,
-        seedEntityId: seed?.id ?? null,
-        seedLabel: seed?.label ?? hint.seed,
-        expandEntityId: expandTo?.id ?? null,
-        expandLabel: expandTo?.label ?? hint.expandTo,
-        reason: hint.reason,
-        weight: hint.weight,
-        ttlTurns: hint.ttlTurns,
-      });
-      retrievalHintIds.push(storedHint.id);
-    }
-
-    for (const adjustment of patch.complexityAdjustments) {
-      const entity = this.resolveEntityReference(entitiesByLabel, adjustment.entity);
-      if (entity) {
-        this.graph.adjustComplexity(entity.id, adjustment.delta, adjustment.missIncrement ?? 0);
-      }
-    }
-
-    if (graphProposalIds.length) {
-      this.reviewManager.noteQueuedMutations({
-        count: graphProposalIds.length,
-        source: "persist_knowledge_patch",
-      });
-    }
-
-    return {
-      entities: [...new Set([...entitiesByLabel.values()])],
-      observations: observationRecords,
-      claimStats,
-      retrievalHintIds,
-      graphProposalIds,
-    };
   }
 
   trackBackgroundTask(task) {
@@ -1226,6 +1289,11 @@ export class ContextOS {
         return result;
       } catch (error) {
         logEmbeddingWarning(`Failed to embed message ${message.id}`, error);
+        void this.alerter.embeddingError(`message:${message.id}`, error, {
+          metadata: {
+            messageId: message.id,
+          },
+        });
         return null;
       } finally {
         this.embeddingTasks.delete(taskKey);
@@ -1269,6 +1337,11 @@ export class ContextOS {
         return result;
       } catch (error) {
         logEmbeddingWarning(`Failed to embed observation ${observation.id}`, error);
+        void this.alerter.embeddingError(`observation:${observation.id}`, error, {
+          metadata: {
+            observationId: observation.id,
+          },
+        });
         return null;
       } finally {
         this.embeddingTasks.delete(taskKey);
@@ -1346,6 +1419,7 @@ export class ContextOS {
         await this.backfillEmbeddings();
       } catch (error) {
         logEmbeddingWarning("Startup embedding backfill failed", error);
+        void this.alerter.embeddingError("startup_backfill", error);
       }
     })();
 
@@ -2848,6 +2922,12 @@ export class ContextOS {
       } catch (error) {
         // If auto-apply fails, fall through and return as proposed
         console.warn(`[proposeMutation] Auto-apply failed for ${stored.id}: ${error.message}`);
+        void this.alerter.mutationFailed(stored.id, error, {
+          metadata: {
+            mutationType: type,
+            actorId,
+          },
+        });
       }
     }
 
@@ -3600,6 +3680,10 @@ export class ContextOS {
         content: synthesizedResponse,
       },
     };
+  }
+
+  getAlertStatus() {
+    return this.alerter.getStatus();
   }
 
   getDashboardData() {
