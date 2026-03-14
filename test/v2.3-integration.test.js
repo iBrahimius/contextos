@@ -1419,6 +1419,130 @@ test("ContextOS runs LOD compression on incremental aggregator clusters and expo
   }
 });
 
+test("ContextOS runs pattern detection after incremental LOD compression and exposes patterns via /api/aggregator", async () => {
+  const llmCalls = [];
+  const repeatedDetail = "Ibrahim starts work at 08:00 on weekdays";
+  const harness = await createHarness({
+    llmClient: {
+      async completeJSON(params) {
+        llmCalls.push(params);
+
+        if (params.prompt.includes("Extract atoms in the following categories")) {
+          const sourceObservationIds = [...params.prompt.matchAll(/\[ID: ([^\]]+)\]/g)]
+            .map((match) => match[1]);
+
+          return {
+            data: {
+              atoms: [
+                {
+                  type: "habit",
+                  text: "Ibrahim repeatedly starts work early on weekdays",
+                  source_observation_ids: sourceObservationIds,
+                  confidence: 0.94,
+                },
+              ],
+            },
+          };
+        }
+
+        if (params.prompt.includes("Generate three levels of abstraction")) {
+          return {
+            data: {
+              l0: "Routine detected: Ibrahim starts work at 08:00 on weekdays.",
+              l1: "Recurring pattern: multiple observations repeat the same weekday start-time routine.",
+              l2: "Four observations in one cluster report the same 08:00 weekday work-start behavior for Ibrahim.",
+            },
+          };
+        }
+
+        throw new Error(`Unexpected prompt: ${params.prompt}`);
+      },
+    },
+  });
+
+  try {
+    const capture = await createMessage(harness, {
+      content: "Ibrahim keeps starting work at 08:00 on weekdays.",
+      scopeKind: "project",
+      scopeId: "proj-aggregator-patterns",
+    });
+    const storedPatch = persistPatchForMessage(harness.contextOS, capture, {
+      entities: [
+        { label: "Ibrahim", kind: "person" },
+      ],
+      observations: [
+        {
+          category: "fact",
+          subjectLabel: "Ibrahim",
+          detail: repeatedDetail,
+          confidence: 0.91,
+          sourceSpan: repeatedDetail,
+          metadata: { tags: ["routine"] },
+        },
+        {
+          category: "fact",
+          subjectLabel: "Ibrahim",
+          detail: repeatedDetail,
+          confidence: 0.89,
+          sourceSpan: repeatedDetail,
+          metadata: { tags: ["routine"] },
+        },
+        {
+          category: "fact",
+          subjectLabel: "Ibrahim",
+          detail: repeatedDetail,
+          confidence: 0.9,
+          sourceSpan: repeatedDetail,
+          metadata: { tags: ["routine"] },
+        },
+        {
+          category: "fact",
+          subjectLabel: "Ibrahim",
+          detail: repeatedDetail,
+          confidence: 0.88,
+          sourceSpan: repeatedDetail,
+          metadata: { tags: ["routine"] },
+        },
+      ],
+      retrieveHints: [],
+      graphProposals: [],
+      complexityAdjustments: [],
+    });
+
+    await harness.contextOS.waitForBackgroundTasks();
+
+    const response = await fetch(`${harness.baseUrl}/api/aggregator`);
+    assert.equal(response.status, 200);
+    const payload = await response.json();
+
+    assert.equal(llmCalls.length, 2);
+    assert.equal(payload.clusterCount, 1);
+    assert.equal(payload.patternCount, 1);
+    assert.equal(payload.clusters.length, 1);
+
+    const [cluster] = payload.clusters;
+    assert.deepEqual(cluster.observationIds.slice().sort(), storedPatch.observations.map((observation) => observation.id).sort());
+    assert.equal(cluster.atomCount, 1);
+    assert.equal(cluster.levelCount, 3);
+    assert.equal(cluster.patternCount, 1);
+    assert.equal(cluster.levels.l0, "Routine detected: Ibrahim starts work at 08:00 on weekdays.");
+
+    const [pattern] = cluster.patterns;
+    assert.equal(pattern.sourceType, "fact");
+    assert.equal(pattern.targetType, "fact");
+    assert.equal(pattern.entityId, storedPatch.observations[0].subjectEntityId);
+    assert.equal(pattern.predicate, "fact");
+    assert.equal(pattern.occurrences, 4);
+    assert.equal(pattern.confidence, 0.9);
+    assert.equal(pattern.bestValue, repeatedDetail);
+    assert.equal(pattern.sourceClaimIds.length, 4);
+    assert.match(llmCalls[0].prompt, /08:00 on weekdays/);
+    assert.match(llmCalls[1].prompt, /starts work early on weekdays/);
+  } finally {
+    await harness.close();
+  }
+});
+
 test("6.6 LOD compression: incremental aggregator detects contradictions", async () => {
   const harness = await createHarness();
 
