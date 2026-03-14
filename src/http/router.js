@@ -4,6 +4,7 @@ import { createCachedRegistry } from "../core/claim-registries.js";
 import { analyzeClaimsTruthSet } from "../core/claim-resolution.js";
 import { normalizeEnrichment } from "../core/normalize-enrichment.js";
 import { getValidTransitions, validateTransition } from "../core/claim-types.js";
+import { lintRefTags, lintRefTagsPath } from "../core/ref-linter.js";
 
 const CONTENT_TYPES = {
   ".css": "text/css; charset=utf-8",
@@ -233,6 +234,37 @@ export async function handleRequest(contextOS, rootDir, request, response) {
       // Trigger embedding backfill — runs in background, returns immediately
       contextOS.backfillEmbeddings({ logProgress: true }).catch(() => {});
       sendJson(response, 202, { ok: true, message: "Backfill started in background" });
+      return;
+    }
+
+    if (request.method === "POST" && pathname === "/api/lint/refs") {
+      const body = await parseJsonBody(request);
+
+      if (typeof body.content === "string") {
+        const filePath = typeof body.path === "string" && body.path.trim() ? body.path.trim() : "<content>";
+        const result = lintRefTags({
+          content: body.content,
+          filePath,
+          database: contextOS.database,
+        });
+        sendJson(response, 200, withGraphVersion(result, resolveGraphVersion(contextOS)));
+        return;
+      }
+
+      if (typeof body.path === "string" && body.path.trim()) {
+        const requestedPath = body.path.trim();
+        const filePath = path.isAbsolute(requestedPath)
+          ? requestedPath
+          : path.resolve(rootDir, requestedPath);
+        const result = await lintRefTagsPath({
+          path: filePath,
+          database: contextOS.database,
+        });
+        sendJson(response, 200, withGraphVersion(result, resolveGraphVersion(contextOS)));
+        return;
+      }
+
+      sendJson(response, 400, withGraphVersion({ error: "Request body must include content or path" }, resolveGraphVersion(contextOS)));
       return;
     }
 
