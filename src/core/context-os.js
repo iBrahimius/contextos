@@ -12,6 +12,7 @@ import { IncrementalAggregator } from "./incremental-aggregator.js";
 import { InjectionGuard } from "./injection-guard.js";
 import { classifyIntent, INTENT_STRATEGIES } from "./intent-router.js";
 import { createLLMClient } from "./llm-client.js";
+import { generateLevels } from "./lod-compression.js";
 import { CLAIM_TYPE_VALUES, LIFECYCLE_STATES } from "./claim-types.js";
 import { normalizeLabel, validateKnowledgePatch } from "./knowledge-patch.js";
 import { PreconsciousBuffer } from "./preconscious.js";
@@ -584,6 +585,7 @@ export class ContextOS {
     this.incrementalAggregator = new IncrementalAggregator();
     this.llmClient = llmClient;
     this.incrementalClusterAtoms = new Map();
+    this.incrementalClusterLevels = new Map();
     this.incrementalClusterAtomTasks = new Map();
     this.incrementalClusterAtomVersions = new Map();
     this.backgroundTasks = new Set();
@@ -707,8 +709,15 @@ export class ContextOS {
         }
 
         processedVersion = targetVersion;
-        const atoms = await this.extractIncrementalClusterAtoms(clusterId);
+        const observations = this.getObservationsForIncrementalCluster(clusterId);
+        const atoms = await this.extractIncrementalClusterAtoms(clusterId, observations);
+        const levels = await this.generateIncrementalClusterLevels(clusterId, {
+          atoms,
+          observations,
+        });
+
         this.incrementalClusterAtoms.set(clusterId, atoms);
+        this.incrementalClusterLevels.set(clusterId, levels);
       }
     })());
 
@@ -740,13 +749,39 @@ export class ContextOS {
       .filter((observation) => observation.text);
   }
 
-  async extractIncrementalClusterAtoms(clusterId) {
-    const observations = this.getObservationsForIncrementalCluster(clusterId);
-    if (observations.length < MIN_INCREMENTAL_ATOM_CLUSTER_SIZE) {
+  async extractIncrementalClusterAtoms(clusterId, observations = null) {
+    if (!this.llmClient) {
       return [];
     }
 
-    return extractAtoms(observations, this.llmClient);
+    const resolvedObservations = observations ?? this.getObservationsForIncrementalCluster(clusterId);
+    if (resolvedObservations.length < MIN_INCREMENTAL_ATOM_CLUSTER_SIZE) {
+      return [];
+    }
+
+    return extractAtoms(resolvedObservations, this.llmClient);
+  }
+
+  async generateIncrementalClusterLevels(clusterId, { atoms = null, observations = null } = {}) {
+    if (!this.llmClient) {
+      return {};
+    }
+
+    const resolvedObservations = observations ?? this.getObservationsForIncrementalCluster(clusterId);
+    if (resolvedObservations.length < MIN_INCREMENTAL_ATOM_CLUSTER_SIZE) {
+      return {};
+    }
+
+    const resolvedAtoms = Array.isArray(atoms)
+      ? atoms
+      : await this.extractIncrementalClusterAtoms(clusterId, resolvedObservations);
+    const levels = await generateLevels(resolvedAtoms, resolvedObservations, this.llmClient);
+
+    return {
+      l0: levels.l0 ?? "",
+      l1: levels.l1 ?? "",
+      l2: levels.l2 ?? "",
+    };
   }
 
   getIncrementalAggregationData() {
@@ -762,6 +797,12 @@ export class ContextOS {
           ...atom,
           source_observation_ids: [...(atom.source_observation_ids ?? [])],
         }));
+        const levelData = this.incrementalClusterLevels.get(clusterId) ?? {};
+        const levels = {
+          l0: levelData.l0 ?? "",
+          l1: levelData.l1 ?? "",
+          l2: levelData.l2 ?? "",
+        };
 
         return {
           clusterId: cluster.clusterId,
@@ -777,6 +818,8 @@ export class ContextOS {
           deduplicatedObservationIds: [...this.incrementalAggregator.getDeduplicated(clusterId)],
           atoms,
           atomCount: atoms.length,
+          levels,
+          levelCount: Object.values(levels).filter((value) => Boolean(value)).length,
         };
       })
       .filter(Boolean);

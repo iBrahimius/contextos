@@ -1206,27 +1206,42 @@ test("ContextOS runs atom extraction on incremental aggregator clusters", async 
     llmClient: {
       async completeJSON(params) {
         llmCalls.push(params);
-        const sourceObservationIds = [...params.prompt.matchAll(/\[ID: ([^\]]+)\]/g)]
-          .map((match) => match[1]);
 
-        return {
-          data: {
-            atoms: [
-              {
-                type: "fact",
-                text: "Ibrahim status updates were captured in one cluster",
-                source_observation_ids: sourceObservationIds.slice(0, 2),
-                confidence: 0.93,
-              },
-              {
-                type: "contradiction",
-                text: "Ibrahim is described as both active and inactive",
-                source_observation_ids: sourceObservationIds,
-                confidence: 0.89,
-              },
-            ],
-          },
-        };
+        if (params.prompt.includes("Extract atoms in the following categories")) {
+          const sourceObservationIds = [...params.prompt.matchAll(/\[ID: ([^\]]+)\]/g)]
+            .map((match) => match[1]);
+
+          return {
+            data: {
+              atoms: [
+                {
+                  type: "fact",
+                  text: "Ibrahim status updates were captured in one cluster",
+                  source_observation_ids: sourceObservationIds.slice(0, 2),
+                  confidence: 0.93,
+                },
+                {
+                  type: "contradiction",
+                  text: "Ibrahim is described as both active and inactive",
+                  source_observation_ids: sourceObservationIds,
+                  confidence: 0.89,
+                },
+              ],
+            },
+          };
+        }
+
+        if (params.prompt.includes("Generate three levels of abstraction")) {
+          return {
+            data: {
+              l0: "Ibrahim status conflict",
+              l1: "Facts and contradiction preserved",
+              l2: "Detailed narrative of the conflicting status updates",
+            },
+          };
+        }
+
+        throw new Error(`Unexpected prompt: ${params.prompt}`);
       },
     },
   });
@@ -1275,7 +1290,7 @@ test("ContextOS runs atom extraction on incremental aggregator clusters", async 
     await harness.contextOS.waitForBackgroundTasks();
     const aggregation = harness.contextOS.getIncrementalAggregationData();
 
-    assert.equal(llmCalls.length, 1);
+    assert.equal(llmCalls.length, 2);
     assert.equal(aggregation.clusterCount, 1);
     assert.equal(aggregation.clusters.length, 1);
 
@@ -1287,6 +1302,118 @@ test("ContextOS runs atom extraction on incremental aggregator clusters", async 
     assert.match(llmCalls[0].prompt, /Ibrahim is active/);
     assert.match(llmCalls[0].prompt, /Ibrahim is inactive/);
     assert.match(llmCalls[0].prompt, /Resolve the conflicting status updates/);
+  } finally {
+    await harness.close();
+  }
+});
+
+test("ContextOS runs LOD compression on incremental aggregator clusters and exposes levels via /api/aggregator", async () => {
+  const llmCalls = [];
+  const harness = await createHarness({
+    llmClient: {
+      async completeJSON(params) {
+        llmCalls.push(params);
+
+        if (params.prompt.includes("Extract atoms in the following categories")) {
+          const sourceObservationIds = [...params.prompt.matchAll(/\[ID: ([^\]]+)\]/g)]
+            .map((match) => match[1]);
+
+          return {
+            data: {
+              atoms: [
+                {
+                  type: "fact",
+                  text: "Ibrahim status updates were captured in one cluster",
+                  source_observation_ids: sourceObservationIds.slice(0, 2),
+                  confidence: 0.93,
+                },
+                {
+                  type: "contradiction",
+                  text: "Ibrahim is described as both active and inactive",
+                  source_observation_ids: sourceObservationIds,
+                  confidence: 0.89,
+                },
+              ],
+            },
+          };
+        }
+
+        if (params.prompt.includes("Generate three levels of abstraction")) {
+          return {
+            data: {
+              l0: "Ibrahim status conflict: active vs inactive, with follow-up required.",
+              l1: "Facts: Ibrahim is active and inactive in the same cluster. Tension: status is contradictory. Open loop: resolve the conflicting updates.",
+              l2: "A single cluster captures Ibrahim being described as active and inactive, plus a follow-up task to resolve the discrepancy.",
+            },
+          };
+        }
+
+        throw new Error(`Unexpected prompt: ${params.prompt}`);
+      },
+    },
+  });
+
+  try {
+    const capture = await createMessage(harness, {
+      content: "Ibrahim is active, then inactive, and we need to resolve it.",
+      scopeKind: "project",
+      scopeId: "proj-aggregator-lod",
+    });
+    const storedPatch = persistPatchForMessage(harness.contextOS, capture, {
+      entities: [
+        { label: "Ibrahim", kind: "person" },
+      ],
+      observations: [
+        {
+          category: "fact",
+          subjectLabel: "Ibrahim",
+          detail: "Ibrahim is active",
+          confidence: 0.9,
+          sourceSpan: "Ibrahim is active",
+          metadata: { tags: ["status"] },
+        },
+        {
+          category: "fact",
+          subjectLabel: "Ibrahim",
+          detail: "Ibrahim is inactive",
+          confidence: 0.86,
+          sourceSpan: "Ibrahim is inactive",
+          metadata: { tags: ["status"] },
+        },
+        {
+          category: "task",
+          subjectLabel: "Ibrahim",
+          detail: "Resolve the conflicting status updates",
+          confidence: 0.92,
+          sourceSpan: "Resolve the conflicting status updates",
+          metadata: { tags: ["follow_up"] },
+        },
+      ],
+      retrieveHints: [],
+      graphProposals: [],
+      complexityAdjustments: [],
+    });
+
+    await harness.contextOS.waitForBackgroundTasks();
+
+    const response = await fetch(`${harness.baseUrl}/api/aggregator`);
+    assert.equal(response.status, 200);
+    const payload = await response.json();
+
+    assert.equal(llmCalls.length, 2);
+    assert.equal(payload.clusterCount, 1);
+    assert.equal(payload.clusters.length, 1);
+
+    const [cluster] = payload.clusters;
+    assert.deepEqual(cluster.observationIds.slice().sort(), storedPatch.observations.map((observation) => observation.id).sort());
+    assert.equal(cluster.atomCount, 2);
+    assert.equal(cluster.levelCount, 3);
+    assert.equal(cluster.levels.l0, "Ibrahim status conflict: active vs inactive, with follow-up required.");
+    assert.match(cluster.levels.l1, /Open loop: resolve the conflicting updates/);
+    assert.match(cluster.levels.l2, /described as active and inactive/);
+    assert.match(llmCalls[1].prompt, /Ibrahim status updates were captured in one cluster/);
+    assert.match(llmCalls[1].prompt, /Ibrahim is active/);
+    assert.match(llmCalls[1].prompt, /Resolve the conflicting status updates/);
   } finally {
     await harness.close();
   }
