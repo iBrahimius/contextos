@@ -2090,8 +2090,15 @@ export class RetrievalEngine {
         continue;
       }
 
-      const maxDepth = 1 + Math.min(4, Math.floor(Math.log2(entity.complexityScore + 1)) + 1);
+      // Cap expansion depth: 2 for low-complexity, 3 max for high-complexity entities
+      // Previous formula allowed up to 5 hops, pulling in unrelated entities (e.g., "Qwen" in CORS queries)
+      const maxDepth = 1 + Math.min(2, Math.floor(Math.log2(entity.complexityScore + 1)) + 1);
       if (current.depth >= maxDepth) {
+        continue;
+      }
+
+      // Global cap: stop expanding if we've already visited enough entities
+      if (visited.size > 80) {
         continue;
       }
 
