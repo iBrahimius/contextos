@@ -35,7 +35,7 @@ Observations:
 ${obsText}
 
 Extract atoms in the following categories:
-- fact: A verifiable or stated claim (e.g., "Ibrahim prefers async patterns")
+- fact: A verifiable or stated claim (e.g., "Alice prefers async patterns")
 - decision: A choice or commitment made (e.g., "We decided to use SQLite")
 - rationale: The reasoning behind a decision or fact (e.g., "SQLite chosen for zero dependencies")
 - tension: A conflict or opposing forces (e.g., "Speed vs. correctness tradeoff")

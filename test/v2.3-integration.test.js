@@ -1150,29 +1150,29 @@ test("ContextOS routes persisted observations into the incremental aggregator", 
 
   try {
     const capture = await createMessage(harness, {
-      content: "Ibrahim is active, then Ibrahim is inactive.",
+      content: "Alice is active, then Alice is inactive.",
       scopeKind: "project",
       scopeId: "proj-aggregator",
     });
     const storedPatch = persistPatchForMessage(harness.contextOS, capture, {
       entities: [
-        { label: "Ibrahim", kind: "person" },
+        { label: "Alice", kind: "person" },
       ],
       observations: [
         {
           category: "fact",
-          subjectLabel: "Ibrahim",
-          detail: "Ibrahim is active",
+          subjectLabel: "Alice",
+          detail: "Alice is active",
           confidence: 0.9,
-          sourceSpan: "Ibrahim is active",
+          sourceSpan: "Alice is active",
           metadata: { tags: ["status"] },
         },
         {
           category: "fact",
-          subjectLabel: "Ibrahim",
-          detail: "Ibrahim is inactive",
+          subjectLabel: "Alice",
+          detail: "Alice is inactive",
           confidence: 0.86,
-          sourceSpan: "Ibrahim is inactive",
+          sourceSpan: "Alice is inactive",
           metadata: { tags: ["status"] },
         },
       ],
@@ -1189,7 +1189,7 @@ test("ContextOS routes persisted observations into the incremental aggregator", 
     const [cluster] = aggregation.clusters;
     assert.deepEqual(cluster.observationIds.slice().sort(), storedPatch.observations.map((observation) => observation.id).sort());
     assert.equal(cluster.observationCount, 2);
-    assert.ok(cluster.entities.includes("Ibrahim"));
+    assert.ok(cluster.entities.includes("Alice"));
     assert.ok(cluster.topics.includes("fact"));
     assert.ok(cluster.topics.includes("status"));
     assert.ok(Math.abs(cluster.avgConfidence - 0.88) < 1e-9);
@@ -1216,13 +1216,13 @@ test("ContextOS runs atom extraction on incremental aggregator clusters", async 
               atoms: [
                 {
                   type: "fact",
-                  text: "Ibrahim status updates were captured in one cluster",
+                  text: "Alice status updates were captured in one cluster",
                   source_observation_ids: sourceObservationIds.slice(0, 2),
                   confidence: 0.93,
                 },
                 {
                   type: "contradiction",
-                  text: "Ibrahim is described as both active and inactive",
+                  text: "Alice is described as both active and inactive",
                   source_observation_ids: sourceObservationIds,
                   confidence: 0.89,
                 },
@@ -1234,7 +1234,7 @@ test("ContextOS runs atom extraction on incremental aggregator clusters", async 
         if (params.prompt.includes("Generate three levels of abstraction")) {
           return {
             data: {
-              l0: "Ibrahim status conflict",
+              l0: "Alice status conflict",
               l1: "Facts and contradiction preserved",
               l2: "Detailed narrative of the conflicting status updates",
             },
@@ -1248,34 +1248,34 @@ test("ContextOS runs atom extraction on incremental aggregator clusters", async 
 
   try {
     const capture = await createMessage(harness, {
-      content: "Ibrahim is active, then inactive, and we need to resolve it.",
+      content: "Alice is active, then inactive, and we need to resolve it.",
       scopeKind: "project",
       scopeId: "proj-aggregator-atoms",
     });
     persistPatchForMessage(harness.contextOS, capture, {
       entities: [
-        { label: "Ibrahim", kind: "person" },
+        { label: "Alice", kind: "person" },
       ],
       observations: [
         {
           category: "fact",
-          subjectLabel: "Ibrahim",
-          detail: "Ibrahim is active",
+          subjectLabel: "Alice",
+          detail: "Alice is active",
           confidence: 0.9,
-          sourceSpan: "Ibrahim is active",
+          sourceSpan: "Alice is active",
           metadata: { tags: ["status"] },
         },
         {
           category: "fact",
-          subjectLabel: "Ibrahim",
-          detail: "Ibrahim is inactive",
+          subjectLabel: "Alice",
+          detail: "Alice is inactive",
           confidence: 0.86,
-          sourceSpan: "Ibrahim is inactive",
+          sourceSpan: "Alice is inactive",
           metadata: { tags: ["status"] },
         },
         {
           category: "task",
-          subjectLabel: "Ibrahim",
+          subjectLabel: "Alice",
           detail: "Resolve the conflicting status updates",
           confidence: 0.92,
           sourceSpan: "Resolve the conflicting status updates",
@@ -1299,8 +1299,8 @@ test("ContextOS runs atom extraction on incremental aggregator clusters", async 
     assert.deepEqual(cluster.atoms.map((atom) => atom.type), ["fact", "contradiction"]);
     assert.deepEqual(cluster.atoms[0].source_observation_ids, cluster.observationIds.slice(0, 2));
     assert.deepEqual(cluster.atoms[1].source_observation_ids, cluster.observationIds);
-    assert.match(llmCalls[0].prompt, /Ibrahim is active/);
-    assert.match(llmCalls[0].prompt, /Ibrahim is inactive/);
+    assert.match(llmCalls[0].prompt, /Alice is active/);
+    assert.match(llmCalls[0].prompt, /Alice is inactive/);
     assert.match(llmCalls[0].prompt, /Resolve the conflicting status updates/);
   } finally {
     await harness.close();
@@ -1323,13 +1323,13 @@ test("ContextOS runs LOD compression on incremental aggregator clusters and expo
               atoms: [
                 {
                   type: "fact",
-                  text: "Ibrahim status updates were captured in one cluster",
+                  text: "Alice status updates were captured in one cluster",
                   source_observation_ids: sourceObservationIds.slice(0, 2),
                   confidence: 0.93,
                 },
                 {
                   type: "contradiction",
-                  text: "Ibrahim is described as both active and inactive",
+                  text: "Alice is described as both active and inactive",
                   source_observation_ids: sourceObservationIds,
                   confidence: 0.89,
                 },
@@ -1341,9 +1341,9 @@ test("ContextOS runs LOD compression on incremental aggregator clusters and expo
         if (params.prompt.includes("Generate three levels of abstraction")) {
           return {
             data: {
-              l0: "Ibrahim status conflict: active vs inactive, with follow-up required.",
-              l1: "Facts: Ibrahim is active and inactive in the same cluster. Tension: status is contradictory. Open loop: resolve the conflicting updates.",
-              l2: "A single cluster captures Ibrahim being described as active and inactive, plus a follow-up task to resolve the discrepancy.",
+              l0: "Alice status conflict: active vs inactive, with follow-up required.",
+              l1: "Facts: Alice is active and inactive in the same cluster. Tension: status is contradictory. Open loop: resolve the conflicting updates.",
+              l2: "A single cluster captures Alice being described as active and inactive, plus a follow-up task to resolve the discrepancy.",
             },
           };
         }
@@ -1355,34 +1355,34 @@ test("ContextOS runs LOD compression on incremental aggregator clusters and expo
 
   try {
     const capture = await createMessage(harness, {
-      content: "Ibrahim is active, then inactive, and we need to resolve it.",
+      content: "Alice is active, then inactive, and we need to resolve it.",
       scopeKind: "project",
       scopeId: "proj-aggregator-lod",
     });
     const storedPatch = persistPatchForMessage(harness.contextOS, capture, {
       entities: [
-        { label: "Ibrahim", kind: "person" },
+        { label: "Alice", kind: "person" },
       ],
       observations: [
         {
           category: "fact",
-          subjectLabel: "Ibrahim",
-          detail: "Ibrahim is active",
+          subjectLabel: "Alice",
+          detail: "Alice is active",
           confidence: 0.9,
-          sourceSpan: "Ibrahim is active",
+          sourceSpan: "Alice is active",
           metadata: { tags: ["status"] },
         },
         {
           category: "fact",
-          subjectLabel: "Ibrahim",
-          detail: "Ibrahim is inactive",
+          subjectLabel: "Alice",
+          detail: "Alice is inactive",
           confidence: 0.86,
-          sourceSpan: "Ibrahim is inactive",
+          sourceSpan: "Alice is inactive",
           metadata: { tags: ["status"] },
         },
         {
           category: "task",
-          subjectLabel: "Ibrahim",
+          subjectLabel: "Alice",
           detail: "Resolve the conflicting status updates",
           confidence: 0.92,
           sourceSpan: "Resolve the conflicting status updates",
@@ -1408,11 +1408,11 @@ test("ContextOS runs LOD compression on incremental aggregator clusters and expo
     assert.deepEqual(cluster.observationIds.slice().sort(), storedPatch.observations.map((observation) => observation.id).sort());
     assert.equal(cluster.atomCount, 2);
     assert.equal(cluster.levelCount, 3);
-    assert.equal(cluster.levels.l0, "Ibrahim status conflict: active vs inactive, with follow-up required.");
+    assert.equal(cluster.levels.l0, "Alice status conflict: active vs inactive, with follow-up required.");
     assert.match(cluster.levels.l1, /Open loop: resolve the conflicting updates/);
     assert.match(cluster.levels.l2, /described as active and inactive/);
-    assert.match(llmCalls[1].prompt, /Ibrahim status updates were captured in one cluster/);
-    assert.match(llmCalls[1].prompt, /Ibrahim is active/);
+    assert.match(llmCalls[1].prompt, /Alice status updates were captured in one cluster/);
+    assert.match(llmCalls[1].prompt, /Alice is active/);
     assert.match(llmCalls[1].prompt, /Resolve the conflicting status updates/);
   } finally {
     await harness.close();
@@ -1421,7 +1421,7 @@ test("ContextOS runs LOD compression on incremental aggregator clusters and expo
 
 test("ContextOS runs pattern detection after incremental LOD compression and exposes patterns via /api/aggregator", async () => {
   const llmCalls = [];
-  const repeatedDetail = "Ibrahim starts work at 08:00 on weekdays";
+  const repeatedDetail = "Alice starts work at 08:00 on weekdays";
   const harness = await createHarness({
     llmClient: {
       async completeJSON(params) {
@@ -1436,7 +1436,7 @@ test("ContextOS runs pattern detection after incremental LOD compression and exp
               atoms: [
                 {
                   type: "habit",
-                  text: "Ibrahim repeatedly starts work early on weekdays",
+                  text: "Alice repeatedly starts work early on weekdays",
                   source_observation_ids: sourceObservationIds,
                   confidence: 0.94,
                 },
@@ -1448,9 +1448,9 @@ test("ContextOS runs pattern detection after incremental LOD compression and exp
         if (params.prompt.includes("Generate three levels of abstraction")) {
           return {
             data: {
-              l0: "Routine detected: Ibrahim starts work at 08:00 on weekdays.",
+              l0: "Routine detected: Alice starts work at 08:00 on weekdays.",
               l1: "Recurring pattern: multiple observations repeat the same weekday start-time routine.",
-              l2: "Four observations in one cluster report the same 08:00 weekday work-start behavior for Ibrahim.",
+              l2: "Four observations in one cluster report the same 08:00 weekday work-start behavior for Alice.",
             },
           };
         }
@@ -1462,18 +1462,18 @@ test("ContextOS runs pattern detection after incremental LOD compression and exp
 
   try {
     const capture = await createMessage(harness, {
-      content: "Ibrahim keeps starting work at 08:00 on weekdays.",
+      content: "Alice keeps starting work at 08:00 on weekdays.",
       scopeKind: "project",
       scopeId: "proj-aggregator-patterns",
     });
     const storedPatch = persistPatchForMessage(harness.contextOS, capture, {
       entities: [
-        { label: "Ibrahim", kind: "person" },
+        { label: "Alice", kind: "person" },
       ],
       observations: [
         {
           category: "fact",
-          subjectLabel: "Ibrahim",
+          subjectLabel: "Alice",
           detail: repeatedDetail,
           confidence: 0.91,
           sourceSpan: repeatedDetail,
@@ -1481,7 +1481,7 @@ test("ContextOS runs pattern detection after incremental LOD compression and exp
         },
         {
           category: "fact",
-          subjectLabel: "Ibrahim",
+          subjectLabel: "Alice",
           detail: repeatedDetail,
           confidence: 0.89,
           sourceSpan: repeatedDetail,
@@ -1489,7 +1489,7 @@ test("ContextOS runs pattern detection after incremental LOD compression and exp
         },
         {
           category: "fact",
-          subjectLabel: "Ibrahim",
+          subjectLabel: "Alice",
           detail: repeatedDetail,
           confidence: 0.9,
           sourceSpan: repeatedDetail,
@@ -1497,7 +1497,7 @@ test("ContextOS runs pattern detection after incremental LOD compression and exp
         },
         {
           category: "fact",
-          subjectLabel: "Ibrahim",
+          subjectLabel: "Alice",
           detail: repeatedDetail,
           confidence: 0.88,
           sourceSpan: repeatedDetail,
@@ -1525,7 +1525,7 @@ test("ContextOS runs pattern detection after incremental LOD compression and exp
     assert.equal(cluster.atomCount, 1);
     assert.equal(cluster.levelCount, 3);
     assert.equal(cluster.patternCount, 1);
-    assert.equal(cluster.levels.l0, "Routine detected: Ibrahim starts work at 08:00 on weekdays.");
+    assert.equal(cluster.levels.l0, "Routine detected: Alice starts work at 08:00 on weekdays.");
 
     const [pattern] = cluster.patterns;
     assert.equal(pattern.sourceType, "fact");

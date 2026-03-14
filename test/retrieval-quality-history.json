@@ -1254,23 +1254,23 @@
     ]
   },
   {
-    "timestamp": "2026-03-14T13:02:16.903Z",
+    "timestamp": "2026-03-14T14:00:43.288Z",
     "label": "baseline",
     "queryCount": 22,
-    "avgPrecisionAt5": 0.102,
-    "avgMRR": 0.159,
+    "avgPrecisionAt5": 0.148,
+    "avgMRR": 0.17,
     "passRate": 0.227,
-    "artifactLeakRate": 0.136,
+    "artifactLeakRate": 0.182,
     "p50LatencyMs": null,
     "p95LatencyMs": null,
-    "totalDurationMs": 3372,
+    "totalDurationMs": 3249,
     "byIntent": {
       "simple": {
         "count": 8,
-        "avgPrecision": 0.063,
-        "avgMRR": 0,
+        "avgPrecision": 0.188,
+        "avgMRR": 0.031,
         "passRate": 0,
-        "artifactLeakRate": 0
+        "artifactLeakRate": 0.125
       },
       "hybrid": {
         "count": 8,
@@ -1311,10 +1311,10 @@
       },
       "entity_state": {
         "count": 3,
-        "avgPrecision": 0,
-        "avgMRR": 0,
+        "avgPrecision": 0.333,
+        "avgMRR": 0.083,
         "passRate": 0,
-        "artifactLeakRate": 0
+        "artifactLeakRate": 0.333
       },
       "mixed": {
         "count": 3,
@@ -1340,12 +1340,16 @@
         "id": "simple-02",
         "intent": "simple",
         "route": "entity_state",
-        "precisionAt5": 0,
-        "mrr": 0,
+        "precisionAt5": 1,
+        "mrr": 0.25,
         "pass": false,
         "typeMatch": false,
-        "artifactViolations": [],
-        "familyCounts": {}
+        "artifactViolations": [
+          "term:benchmark"
+        ],
+        "familyCounts": {
+          "conversational": 5
+        }
       },
       {
         "id": "simple-03",

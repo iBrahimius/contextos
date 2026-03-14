@@ -43,9 +43,9 @@ function seedRegistry(db) {
   const conversation = db.createConversation("Ref Linter Test");
   const message = createSeedMessage(db, conversation.id, "Seed registry data for ref linter tests.");
 
-  const ibrahim = db.insertEntity({ label: "Ibrahim", kind: "person" });
+  const alice = db.insertEntity({ label: "Alice", kind: "person" });
   const dns = db.insertEntity({ label: "DNS on Cloudflare", kind: "project" });
-  const ibrahimId = ibrahim.id;
+  const aliceId = alice.id;
   const dnsId = dns.id;
 
   const decisionObservation = db.insertObservation({
@@ -145,14 +145,14 @@ function seedRegistry(db) {
   return {
     conversation,
     message,
-    entityIds: { ibrahimId, dnsId },
+    entityIds: { aliceId, dnsId },
     registryIds: { decisionId, taskId, constraintId },
   };
 }
 
 function getSnapshotEntries(snapshot) {
   return {
-    entity: snapshot.entity.find((entry) => entry.label === "Ibrahim"),
+    entity: snapshot.entity.find((entry) => entry.label === "Alice"),
     decision: snapshot.decision.find((entry) => entry.title === "DNS on Cloudflare"),
     task: snapshot.task.find((entry) => entry.title === "Update the cutover checklist"),
     constraint: snapshot.constraint.find((entry) => entry.detail === "Keep TTL above 60 seconds."),
@@ -203,7 +203,7 @@ async function withHarness(callback) {
 
 test("extractRefTags ignores code fences and parses status assertions", () => {
   const tags = extractRefTags([
-    "Visible tag <!-- ref:entity/ibrahim -->",
+    "Visible tag <!-- ref:entity/alice -->",
     "```md",
     "Hidden tag <!-- ref:decision/ignored =active -->",
     "```",
@@ -212,7 +212,7 @@ test("extractRefTags ignores code fences and parses status assertions", () => {
 
   assert.equal(tags.length, 2);
   assert.deepEqual(tags.map((tag) => ({ type: tag.type, id: tag.id, status: tag.status, line: tag.line })), [
-    { type: "entity", id: "ibrahim", status: null, line: 1 },
+    { type: "entity", id: "alice", status: null, line: 1 },
     { type: "task", id: "update_cutover_checklist", status: "done", line: 5 },
   ]);
 });

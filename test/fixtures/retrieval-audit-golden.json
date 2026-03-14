@@ -3,7 +3,7 @@
     "id": "entity-owner-claim",
     "query": "Who owns ContextOS?",
     "expectedIntent": "current-state",
-    "expectedClaimValue": "Ibrahim"
+    "expectedClaimValue": "Alice"
   },
   {
     "id": "dns-current-truth",

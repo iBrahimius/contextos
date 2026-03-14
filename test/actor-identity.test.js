@@ -23,7 +23,7 @@ test("actor identity is stored across ingests and API writes", async () => {
   const authored = await contextOS.ingestMessage({
     conversationId: conversation.id,
     conversationTitle: conversation.title,
-    actorId: "user:ibrahim",
+    actorId: "user:alice",
     role: "user",
     direction: "inbound",
     content: "ContextOS must keep SQLite local.",
@@ -86,9 +86,9 @@ test("actor identity is stored across ingests and API writes", async () => {
     WHERE id = ?
   `).get(defaulted.message.id);
 
-  assert.equal(storedMessage.actor_id, "user:ibrahim");
-  assert.equal(storedObservation.actor_id, "user:ibrahim");
-  assert.equal(storedProposal.actor_id, "user:ibrahim");
+  assert.equal(storedMessage.actor_id, "user:alice");
+  assert.equal(storedObservation.actor_id, "user:alice");
+  assert.equal(storedProposal.actor_id, "user:alice");
   assert.equal(defaultMessage.actor_id, "system");
 
   const server = http.createServer((request, response) => handleRequest(contextOS, rootDir, request, response));
