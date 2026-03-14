@@ -287,6 +287,13 @@ CREATE VIRTUAL TABLE IF NOT EXISTS claims_fts USING fts5(
   content
 );
 
+CREATE TABLE IF NOT EXISTS claim_embeddings (
+  claim_id TEXT PRIMARY KEY REFERENCES claims(id),
+  embedding BLOB NOT NULL,
+  model TEXT NOT NULL DEFAULT 'embeddinggemma-300m',
+  created_at TEXT NOT NULL DEFAULT (datetime('now'))
+);
+
 CREATE TABLE IF NOT EXISTS claim_backfill_status (
   observation_id TEXT PRIMARY KEY REFERENCES observations(id) ON DELETE CASCADE,
   status TEXT NOT NULL CHECK (status IN ('claim_created', 'no_claim', 'failed')),

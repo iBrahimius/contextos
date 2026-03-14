@@ -1509,10 +1509,26 @@ export class ContextOS {
       },
     });
 
+    let processedClaims = 0;
+    if (this.database.hasTable("claim_embeddings")) {
+      processedClaims = await backfillBatch({
+        kind: "claims",
+        listMissing: (limit) => this.database.listClaimsMissingEmbeddings(limit),
+        selectText: (claim) => claim.detail,
+        persist: (claim, embedding) => {
+          this.database.upsertClaimEmbedding({
+            claimId: claim.id,
+            embedding,
+          });
+        },
+      });
+    }
+
     return {
-      processed: processedMessages + processedObservations,
+      processed: processedMessages + processedObservations + processedClaims,
       processedMessages,
       processedObservations,
+      processedClaims,
       ...this.database.getEmbeddingCoverage(),
     };
   }
@@ -4495,7 +4511,8 @@ export class ContextOS {
         promotions_proposed: promotionsProposed,
         claim_states: claimStates,
         graph_version: this.graph.getGraphVersion(),
-        orphaned_embeddings_pruned: this.database.pruneOrphanedObservationEmbeddings(),
+        orphaned_embeddings_pruned: this.database.pruneOrphanedObservationEmbeddings()
+          + this.database.pruneOrphanedClaimEmbeddings(),
       };
     } finally {
       this._dreamCycleLock = false;

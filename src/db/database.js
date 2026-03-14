@@ -486,6 +486,112 @@ export class ContextDatabase {
     `).run();
   }
 
+  upsertClaimEmbedding({ claimId, embedding, model = DEFAULT_EMBEDDING_MODEL }) {
+    const serialized = serializeEmbedding(embedding);
+    if (!serialized) {
+      return null;
+    }
+
+    const createdAt = nowIso();
+
+    this.prepare(`
+      INSERT INTO claim_embeddings (claim_id, embedding, model, created_at)
+      VALUES (?, ?, ?, ?)
+      ON CONFLICT(claim_id) DO UPDATE SET
+        embedding = excluded.embedding,
+        model = excluded.model,
+        created_at = excluded.created_at
+    `).run(claimId, serialized, model, createdAt);
+
+    return { claimId, model, createdAt };
+  }
+
+  getClaimEmbedding(claimId) {
+    const row = this.prepare(`
+      SELECT
+        claim_id AS claimId,
+        embedding,
+        model,
+        created_at AS createdAt
+      FROM claim_embeddings
+      WHERE claim_id = ?
+      LIMIT 1
+    `).get(claimId);
+
+    if (!row) {
+      return null;
+    }
+
+    return {
+      ...row,
+      embedding: deserializeEmbedding(row.embedding),
+    };
+  }
+
+  listClaimsMissingEmbeddings(limit = null) {
+    const resolvedLimit = clampLimit(limit);
+    const params = resolvedLimit === null ? [] : [resolvedLimit];
+    const limitClause = resolvedLimit === null ? "" : "\n      LIMIT ?\n    ";
+
+    return this.prepare(`
+      SELECT c.id, c.value_text AS detail, c.claim_type
+      FROM claims c
+      LEFT JOIN claim_embeddings ce ON ce.claim_id = c.id
+      WHERE ce.claim_id IS NULL
+        AND c.value_text IS NOT NULL
+        AND length(c.value_text) > 10
+        AND c.lifecycle_state IN ('active', 'candidate', 'disputed')
+      ORDER BY c.created_at DESC${limitClause}
+    `).all(...params);
+  }
+
+  listEmbeddedClaims(scopeFilter = null) {
+    if (!this.hasTable("claim_embeddings")) {
+      return [];
+    }
+
+    return this.prepare(`
+      SELECT
+        c.id,
+        c.claim_type,
+        c.value_text,
+        c.lifecycle_state,
+        c.confidence,
+        c.importance_score,
+        c.subject_entity_id,
+        c.object_entity_id,
+        c.predicate,
+        c.scope_kind,
+        c.scope_id,
+        c.created_at,
+        ce.embedding,
+        ce.model
+      FROM claim_embeddings ce
+      JOIN claims c ON c.id = ce.claim_id
+      WHERE c.lifecycle_state IN ('active', 'candidate', 'disputed')
+        AND c.superseded_by_claim_id IS NULL
+      ORDER BY c.created_at DESC
+    `)
+      .all()
+      .filter((row) => scopeMatches(row, scopeFilter, "private"))
+      .map((row) => ({
+        ...row,
+        embedding: deserializeEmbedding(row.embedding),
+      }));
+  }
+
+  pruneOrphanedClaimEmbeddings() {
+    if (!this.hasTable("claim_embeddings")) {
+      return 0;
+    }
+
+    const result = this.prepare(`
+      DELETE FROM claim_embeddings
+      WHERE claim_id NOT IN (SELECT id FROM claims)
+    `).run();
+    return result.changes;
+  }
+
   backfillClaimsFts() {
     if (!this.hasTable("claims") || !this.hasTable("claims_fts")) {
       return;
@@ -1336,10 +1442,25 @@ export class ContextDatabase {
     const total = Number(row?.total ?? 0);
     const embedded = Number(row?.embedded ?? 0);
 
+    const claimRow = this.hasTable("claim_embeddings")
+      ? this.prepare(`
+          SELECT
+            (SELECT COUNT(*) FROM claims WHERE value_text IS NOT NULL AND length(value_text) > 10
+              AND lifecycle_state IN ('active', 'candidate', 'disputed')) AS claimsTotal,
+            (SELECT COUNT(*) FROM claim_embeddings) AS claimsEmbedded
+        `).get()
+      : { claimsTotal: 0, claimsEmbedded: 0 };
+
+    const claimsTotal = Number(claimRow?.claimsTotal ?? 0);
+    const claimsEmbedded = Number(claimRow?.claimsEmbedded ?? 0);
+
     return {
       embedded,
       total,
       coverage: total > 0 ? Number(((embedded / total) * 100).toFixed(2)) : 0,
+      claimsEmbedded,
+      claimsTotal,
+      claimsCoverage: claimsTotal > 0 ? Number(((claimsEmbedded / claimsTotal) * 100).toFixed(2)) : 0,
     };
   }
 

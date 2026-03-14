@@ -249,19 +249,19 @@ export const RETRIEVAL_ROUTE_PROFILES = {
 
 const ROUTE_SOURCE_KEYS = {
   current_state: {
-    primary: ["claims", "claimsFts", "graphCanonical", "registryLexical"],
+    primary: ["claims", "claimsFts", "vectorClaims", "graphCanonical", "registryLexical"],
     secondary: ["graphConversational", "vectorObservations", "vectorMessages", "ftsConversational"],
   },
   history_temporal: {
     primary: ["graphConversational", "vectorMessages", "vectorObservations", "ftsConversational"],
-    secondary: ["graphCanonical", "claims", "claimsFts", "registryLexical"],
+    secondary: ["graphCanonical", "claims", "claimsFts", "vectorClaims", "registryLexical"],
   },
   why_explanatory: {
-    primary: ["graphConversational", "graphCanonical", "claims", "claimsFts", "vectorObservations", "ftsConversational"],
+    primary: ["graphConversational", "graphCanonical", "claims", "claimsFts", "vectorClaims", "vectorObservations", "ftsConversational"],
     secondary: ["vectorMessages", "registryLexical", "clusterLevels"],
   },
   general: {
-    primary: ["graphCanonical", "claims", "claimsFts", "registryLexical", "graphConversational", "vectorObservations"],
+    primary: ["graphCanonical", "claims", "claimsFts", "vectorClaims", "registryLexical", "graphConversational", "vectorObservations"],
     secondary: ["vectorMessages", "ftsConversational", "clusterLevels"],
   },
 };
@@ -2603,6 +2603,28 @@ export class RetrievalEngine {
     // Claims FTS: direct text search on claims (catches unlinked claims missed by entity-based retrieval)
     const claimsFtsResults = createClaimsFtsResults(this.database, queryText, resolvedScopeFilter);
 
+    // Claims vector search: semantic similarity on embedded claims
+    const claimVectorResults = queryEmbedding
+      ? this.database.listEmbeddedClaims(resolvedScopeFilter)
+          .map((claim) => ({
+            ...claim,
+            vectorScore: cosineSimilarity(queryEmbedding, claim.embedding),
+          }))
+          .filter((claim) => Number.isFinite(claim.vectorScore) && claim.vectorScore > 0.3)
+          .sort((left, right) => right.vectorScore - left.vectorScore)
+          .slice(0, 30)
+          .map((claim) => decorateRetrievalResult({
+            type: "claim",
+            id: claim.id,
+            entityId: claim.subject_entity_id ?? claim.object_entity_id ?? null,
+            lifecycle_state: claim.lifecycle_state,
+            summary: claim.value_text,
+            payload: claim,
+            tokenCount: estimateTokens(claim.value_text),
+            hintIds: [],
+          }, "vector"))
+      : [];
+
     const sourceLists = {
       graphCanonical: dedupeResults([
         ...entityResults,
@@ -2624,6 +2646,7 @@ export class RetrievalEngine {
       clusterLevels: dedupeResults(clusterLevelResults),
       claims: dedupeResults(claimsResults),
       claimsFts: dedupeResults(claimsFtsResults),
+      vectorClaims: dedupeResults(claimVectorResults),
       registryLexical: dedupeResults(registryLexicalResults),
     };
 
