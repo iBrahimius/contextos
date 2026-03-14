@@ -13,6 +13,7 @@ import { InjectionGuard } from "./injection-guard.js";
 import { classifyIntent, INTENT_STRATEGIES } from "./intent-router.js";
 import { createLLMClient } from "./llm-client.js";
 import { generateLevels } from "./lod-compression.js";
+import { detectPatterns } from "./pattern-detection.js";
 import { CLAIM_TYPE_VALUES, LIFECYCLE_STATES } from "./claim-types.js";
 import { normalizeLabel, validateKnowledgePatch } from "./knowledge-patch.js";
 import { PreconsciousBuffer } from "./preconscious.js";
@@ -586,6 +587,7 @@ export class ContextOS {
     this.llmClient = llmClient;
     this.incrementalClusterAtoms = new Map();
     this.incrementalClusterLevels = new Map();
+    this.incrementalClusterPatterns = new Map();
     this.incrementalClusterAtomTasks = new Map();
     this.incrementalClusterAtomVersions = new Map();
     this.backgroundTasks = new Set();
@@ -687,7 +689,7 @@ export class ContextOS {
   }
 
   scheduleIncrementalClusterAtomExtraction(clusterId) {
-    if (!this.llmClient || clusterId === null || clusterId === undefined) {
+    if (clusterId === null || clusterId === undefined) {
       return null;
     }
 
@@ -715,9 +717,11 @@ export class ContextOS {
           atoms,
           observations,
         });
+        const patterns = this.detectIncrementalClusterPatterns(clusterId);
 
         this.incrementalClusterAtoms.set(clusterId, atoms);
         this.incrementalClusterLevels.set(clusterId, levels);
+        this.incrementalClusterPatterns.set(clusterId, patterns);
       }
     })());
 
@@ -747,6 +751,45 @@ export class ContextOS {
         confidence: clamp(Number(observation.confidence ?? 0.5), 0, 1),
       }))
       .filter((observation) => observation.text);
+  }
+
+  getClaimsForIncrementalCluster(clusterId) {
+    const cluster = this.incrementalAggregator.getClusterMeta(clusterId);
+    if (!cluster?.observationIds?.length) {
+      return [];
+    }
+
+    return this.database.listClaimsByObservationIds(cluster.observationIds).filter(Boolean);
+  }
+
+  detectIncrementalClusterPatterns(
+    clusterId,
+    { claims = null, lookbackDays = 14, minOccurrences = 3, similarityThreshold = 0.75 } = {},
+  ) {
+    const resolvedClaims = Array.isArray(claims)
+      ? claims.filter(Boolean)
+      : this.getClaimsForIncrementalCluster(clusterId);
+    if (resolvedClaims.length < minOccurrences) {
+      return [];
+    }
+
+    // Incremental cluster patterns operate on the cluster's observed claim stream,
+    // not only on globally active/candidate claims, so we intentionally keep the
+    // full per-observation claim set here.
+    const { patterns } = detectPatterns({
+      listRecentClaims: ({ limit = null } = {}) => {
+        const limitedClaims = limit === null || limit === undefined
+          ? resolvedClaims
+          : resolvedClaims.slice(0, limit);
+        return limitedClaims;
+      },
+    }, {
+      lookbackDays,
+      minOccurrences,
+      similarityThreshold,
+    });
+
+    return patterns;
   }
 
   async extractIncrementalClusterAtoms(clusterId, observations = null) {
@@ -803,6 +846,10 @@ export class ContextOS {
           l1: levelData.l1 ?? "",
           l2: levelData.l2 ?? "",
         };
+        const patterns = (this.incrementalClusterPatterns.get(clusterId) ?? []).map((pattern) => ({
+          ...pattern,
+          sourceClaimIds: [...(pattern.sourceClaimIds ?? [])],
+        }));
 
         return {
           clusterId: cluster.clusterId,
@@ -820,6 +867,8 @@ export class ContextOS {
           atomCount: atoms.length,
           levels,
           levelCount: Object.values(levels).filter((value) => Boolean(value)).length,
+          patterns,
+          patternCount: patterns.length,
         };
       })
       .filter(Boolean);
@@ -828,6 +877,7 @@ export class ContextOS {
       clusterCount: clusters.length,
       observationCount: clusters.reduce((total, cluster) => total + cluster.observationCount, 0),
       contradictionCount: clusters.reduce((total, cluster) => total + cluster.contradictionCount, 0),
+      patternCount: clusters.reduce((total, cluster) => total + cluster.patternCount, 0),
       clusters,
     };
   }
