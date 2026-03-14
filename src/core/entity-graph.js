@@ -40,16 +40,33 @@ const QUERY_STOPWORDS = new Set([
   "with",
 ]);
 const GENERIC_QUERY_ENTITY_LABELS = new Set([
+  "config",
+  "configuration",
+  "constraint",
+  "decision",
   "design",
   "email",
+  "fact",
   "hosting",
   "marketing",
+  "observation",
   "platform",
   "price",
   "provider",
   "reasoning",
+  "relationship",
   "service",
   "status",
+  "task",
+]);
+
+/**
+ * Entity kinds that represent meta-concepts (system internals / abstract categories)
+ * rather than real-world things. These get suppressed in query seeding to avoid
+ * graph expansion noise.
+ */
+const GENERIC_ENTITY_KINDS = new Set([
+  "capability",
 ]);
 
 function tokenizeForQuery(value, { dropStopwords = true } = {}) {
@@ -278,11 +295,17 @@ export class EntityGraph {
           && GENERIC_QUERY_ENTITY_LABELS.has(labelTokens[0]);
         const multiTokenCoverageTooLow = !singleToken && overlap > 0 && coverage < 0.5;
 
+        // Suppress meta-concept entity kinds (capability, component)
+        const genericKind = GENERIC_ENTITY_KINDS.has(entity.kind);
+
         if (weakSingleToken || multiTokenCoverageTooLow) {
           score *= 0.2;
         }
         if (genericSingleTokenExact) {
           score *= 0.15;
+        }
+        if (genericKind) {
+          score *= 0.1;
         }
 
         if (score < 1.5) {
