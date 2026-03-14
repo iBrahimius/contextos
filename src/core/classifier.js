@@ -267,19 +267,10 @@ function deriveRelationship(sentence, entities) {
     }
   }
 
-  if (!relations.length && entities.length > 1) {
-    const [first, ...rest] = entities;
-    for (const entity of rest) {
-      relations.push({
-        category: "relationship",
-        predicate: "related_to",
-        subjectLabel: first.label,
-        objectLabel: entity.label,
-        detail: `${first.label} related to ${entity.label}`,
-        confidence: 0.45,
-      });
-    }
-  }
+  // Removed: catch-all related_to fallback at 0.45 confidence.
+  // This produced 8K+ junk relationship proposals with null subjects/objects
+  // and empty details. Real relationships come from Haiku classification
+  // or the regex patterns above — the fallback added only noise.
 
   return relations;
 }
