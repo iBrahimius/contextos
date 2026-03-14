@@ -667,6 +667,31 @@ export async function handleRequest(contextOS, rootDir, request, response) {
       return;
     }
 
+    if (request.method === "GET" && pathname === "/api/review/status") {
+      sendJson(
+        response,
+        200,
+        withGraphVersion(contextOS.getReviewStatus(), resolveGraphVersion(contextOS)),
+      );
+      return;
+    }
+
+    if (request.method === "POST" && pathname === "/api/review/trigger") {
+      const body = await parseJsonBody(request);
+      sendJson(
+        response,
+        200,
+        withGraphVersion(
+          await contextOS.triggerReview({
+            source: "manual",
+            reason: body.reason ?? "manual_trigger",
+          }),
+          resolveGraphVersion(contextOS),
+        ),
+      );
+      return;
+    }
+
     if (request.method === "POST" && pathname === "/api/index") {
       const body = await parseJsonBody(request);
       const result = await contextOS.indexMarkdownDirectory(body.path ?? "docs", {

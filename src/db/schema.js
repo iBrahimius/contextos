@@ -350,6 +350,20 @@ CREATE TABLE IF NOT EXISTS system_state (
 
 INSERT OR IGNORE INTO system_state VALUES ('graph_version', '0', datetime('now'));
 
+CREATE TABLE IF NOT EXISTS review_state (
+  id INTEGER PRIMARY KEY CHECK (id = 1),
+  last_review_at TEXT,
+  mutations_since_last_review INTEGER NOT NULL DEFAULT 0,
+  review_in_progress INTEGER NOT NULL DEFAULT 0 CHECK (review_in_progress IN (0, 1))
+);
+
+INSERT OR IGNORE INTO review_state (
+  id,
+  last_review_at,
+  mutations_since_last_review,
+  review_in_progress
+) VALUES (1, NULL, 0, 0);
+
 -- ── Session Checkpoints (v2.3) ──────────────────────────────────────
 
 CREATE TABLE IF NOT EXISTS session_checkpoints (

@@ -403,6 +403,7 @@ export class ContextDatabase {
     this.dbPath = dbPath;
     fs.mkdirSync(path.dirname(dbPath), { recursive: true });
     this.sqlite = new DatabaseSync(dbPath);
+    this.closed = false;
     this._inTransaction = false;
 
     // Enable WAL mode for concurrent reads, better write performance, and crash resilience.
@@ -512,6 +513,141 @@ export class ContextDatabase {
 
       return this.getGraphVersion();
     });
+  }
+
+  ensureReviewState() {
+    this.prepare(`
+      INSERT OR IGNORE INTO review_state (
+        id,
+        last_review_at,
+        mutations_since_last_review,
+        review_in_progress
+      )
+      VALUES (1, NULL, 0, 0)
+    `).run();
+  }
+
+  getReviewState() {
+    this.ensureReviewState();
+
+    const row = this.prepare(`
+      SELECT
+        last_review_at AS lastReviewAt,
+        mutations_since_last_review AS mutationsSinceLastReview,
+        review_in_progress AS reviewInProgress
+      FROM review_state
+      WHERE id = 1
+      LIMIT 1
+    `).get();
+
+    return {
+      lastReviewAt: row?.lastReviewAt ?? null,
+      mutationsSinceLastReview: Number(row?.mutationsSinceLastReview ?? 0),
+      reviewInProgress: Boolean(row?.reviewInProgress),
+    };
+  }
+
+  updateReviewState({
+    lastReviewAt = undefined,
+    mutationsSinceLastReview = undefined,
+    reviewInProgress = undefined,
+  } = {}) {
+    this.ensureReviewState();
+
+    const assignments = [];
+    const params = [];
+
+    if (lastReviewAt !== undefined) {
+      assignments.push(`last_review_at = ?`);
+      params.push(lastReviewAt);
+    }
+
+    if (mutationsSinceLastReview !== undefined) {
+      assignments.push(`mutations_since_last_review = ?`);
+      params.push(Math.max(0, Math.trunc(Number(mutationsSinceLastReview) || 0)));
+    }
+
+    if (reviewInProgress !== undefined) {
+      assignments.push(`review_in_progress = ?`);
+      params.push(reviewInProgress ? 1 : 0);
+    }
+
+    if (!assignments.length) {
+      return this.getReviewState();
+    }
+
+    params.push(1);
+    this.prepare(`
+      UPDATE review_state
+      SET ${assignments.join(", ")}
+      WHERE id = ?
+    `).run(...params);
+
+    return this.getReviewState();
+  }
+
+  incrementReviewMutationCount(amount = 1) {
+    const normalizedAmount = Math.max(0, Math.trunc(Number(amount) || 0));
+    if (!normalizedAmount) {
+      return this.getReviewState();
+    }
+
+    this.ensureReviewState();
+    this.prepare(`
+      UPDATE review_state
+      SET mutations_since_last_review = mutations_since_last_review + ?
+      WHERE id = 1
+    `).run(normalizedAmount);
+
+    return this.getReviewState();
+  }
+
+  resetReviewInProgress() {
+    return this.updateReviewState({ reviewInProgress: false });
+  }
+
+  tryStartReviewRun() {
+    this.ensureReviewState();
+
+    const result = this.prepare(`
+      UPDATE review_state
+      SET review_in_progress = 1
+      WHERE id = 1
+        AND review_in_progress = 0
+    `).run();
+
+    return result.changes > 0;
+  }
+
+  completeReviewRun({ lastReviewAt = nowIso(), mutationsSinceLastReview = 0 } = {}) {
+    return this.updateReviewState({
+      lastReviewAt,
+      mutationsSinceLastReview,
+      reviewInProgress: false,
+    });
+  }
+
+  getPendingGraphProposalStats(statuses = ["pending", "proposed"]) {
+    const normalizedStatuses = Array.isArray(statuses)
+      ? statuses.map((status) => String(status ?? "").trim()).filter(Boolean)
+      : [];
+    const effectiveStatuses = normalizedStatuses.length ? normalizedStatuses : ["pending", "proposed"];
+    const placeholders = effectiveStatuses.map(() => "?").join(", ");
+
+    const row = this.prepare(`
+      SELECT
+        COUNT(*) AS total,
+        MIN(created_at) AS oldestCreatedAt,
+        MAX(created_at) AS newestCreatedAt
+      FROM graph_proposals
+      WHERE status IN (${placeholders})
+    `).get(...effectiveStatuses);
+
+    return {
+      total: Number(row?.total ?? 0),
+      oldestCreatedAt: row?.oldestCreatedAt ?? null,
+      newestCreatedAt: row?.newestCreatedAt ?? null,
+    };
   }
 
   prepare(sql) {
@@ -3631,6 +3767,7 @@ export class ContextDatabase {
   }
 
   close() {
+    this.closed = true;
     this.sqlite.close();
   }
 }

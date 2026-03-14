@@ -13,6 +13,7 @@ import { CLAIM_TYPE_VALUES, LIFECYCLE_STATES } from "./claim-types.js";
 import { normalizeLabel, validateKnowledgePatch } from "./knowledge-patch.js";
 import { PreconsciousBuffer } from "./preconscious.js";
 import { RetrievalEngine } from "./retrieval.js";
+import { ReviewManager } from "./review-manager.js";
 import { VectorIndex } from "./vector-index.js";
 import { clamp, estimateTokens, parseJson } from "./utils.js";
 import { AI_AUTO_APPLY_CONFIDENCE_THRESHOLD, classifyWriteClass, getQueuePressureDisposition, getWriteClassDisposition } from "./write-discipline.js";
@@ -549,7 +550,7 @@ function countUniqueIds(collections = []) {
 }
 
 export class ContextOS {
-  constructor({ rootDir, autoBackfillEmbeddings = true, deferInit = false }) {
+  constructor({ rootDir, autoBackfillEmbeddings = true, deferInit = false, reviewManagerOptions = {} }) {
     this.rootDir = rootDir;
     this.database = new ContextDatabase(path.join(rootDir, "data", "contextos.db"));
     this.telemetry = new TelemetryDatabase(path.join(rootDir, "data", "contextos_telemetry.db"));
@@ -579,6 +580,12 @@ export class ContextOS {
     this._assemblyCache = createAssemblyCache();
     // v2.3: preconscious buffer and dream cycle lock
     this.preconsciousBuffer = new PreconsciousBuffer(50);
+    this.reviewManager = new ReviewManager({
+      contextOS: this,
+      database: this.database,
+      registerTask: (task) => this.trackBackgroundTask(task),
+      ...reviewManagerOptions,
+    });
     this._dreamCycleLock = false;
     this._lastDreamCycleTimestamp = null;
     this._autoBackfillEmbeddings = autoBackfillEmbeddings;
@@ -602,6 +609,7 @@ export class ContextOS {
     if (this._autoBackfillEmbeddings) {
       this.startEmbeddingBackfill();
     }
+    this.reviewManager.start();
     this.ready = true;
   }
 
@@ -877,6 +885,13 @@ export class ContextOS {
       }
     }
 
+    if (graphProposalIds.length) {
+      this.reviewManager.noteQueuedMutations({
+        count: graphProposalIds.length,
+        source: "persist_knowledge_patch",
+      });
+    }
+
     return {
       entities: [...new Set([...entitiesByLabel.values()])],
       observations: observationRecords,
@@ -901,6 +916,7 @@ export class ContextOS {
   }
 
   async close() {
+    await this.reviewManager.stop();
     await this.waitForBackgroundTasks();
     this.database.close();
     this.telemetry.close();
@@ -2564,6 +2580,11 @@ export class ContextOS {
       }
     }
 
+    this.reviewManager.noteQueuedMutations({
+      count: 1,
+      source: "propose_mutation",
+    });
+
     return {
       ok: true,
       proposal_id: stored.id,
@@ -3017,6 +3038,14 @@ export class ContextOS {
     }
 
     invalidReviewPayload(`Unsupported action: ${action}`);
+  }
+
+  triggerReview(options = {}) {
+    return this.reviewManager.trigger(options);
+  }
+
+  getReviewStatus() {
+    return this.reviewManager.getStatus();
   }
 
   getStatusData() {
