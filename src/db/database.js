@@ -1087,6 +1087,18 @@ export class ContextDatabase {
     };
   }
 
+  /**
+   * Delete observation embeddings whose observation no longer exists.
+   * Returns the number of orphaned rows removed.
+   */
+  pruneOrphanedObservationEmbeddings() {
+    const result = this.prepare(`
+      DELETE FROM observation_embeddings
+      WHERE observation_id NOT IN (SELECT id FROM observations)
+    `).run();
+    return result.changes;
+  }
+
   listMessagesMissingEmbeddings(limit = null) {
     const resolvedLimit = clampLimit(limit);
     const params = resolvedLimit === null ? [] : [resolvedLimit];

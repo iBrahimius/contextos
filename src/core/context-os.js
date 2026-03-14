@@ -4491,6 +4491,7 @@ export class ContextOS {
         promotions_proposed: promotionsProposed,
         claim_states: claimStates,
         graph_version: this.graph.getGraphVersion(),
+        orphaned_embeddings_pruned: this.database.pruneOrphanedObservationEmbeddings(),
       };
     } finally {
       this._dreamCycleLock = false;
