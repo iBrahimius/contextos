@@ -14,11 +14,12 @@ async function makeRoot() {
   return root;
 }
 
-async function createHarness() {
+async function createHarness(options = {}) {
   const rootDir = await makeRoot();
   const contextOS = new ContextOS({
     rootDir,
     autoBackfillEmbeddings: false,
+    llmClient: options.llmClient,
   });
 
   // Ensure importance_score column exists (migration runs before schema on fresh DBs)
@@ -1194,6 +1195,98 @@ test("ContextOS routes persisted observations into the incremental aggregator", 
     assert.ok(Math.abs(cluster.avgConfidence - 0.88) < 1e-9);
     assert.match(cluster.startTime, /^\d{4}-\d{2}-\d{2}T/);
     assert.match(cluster.endTime, /^\d{4}-\d{2}-\d{2}T/);
+  } finally {
+    await harness.close();
+  }
+});
+
+test("ContextOS runs atom extraction on incremental aggregator clusters", async () => {
+  const llmCalls = [];
+  const harness = await createHarness({
+    llmClient: {
+      async completeJSON(params) {
+        llmCalls.push(params);
+        const sourceObservationIds = [...params.prompt.matchAll(/\[ID: ([^\]]+)\]/g)]
+          .map((match) => match[1]);
+
+        return {
+          data: {
+            atoms: [
+              {
+                type: "fact",
+                text: "Ibrahim status updates were captured in one cluster",
+                source_observation_ids: sourceObservationIds.slice(0, 2),
+                confidence: 0.93,
+              },
+              {
+                type: "contradiction",
+                text: "Ibrahim is described as both active and inactive",
+                source_observation_ids: sourceObservationIds,
+                confidence: 0.89,
+              },
+            ],
+          },
+        };
+      },
+    },
+  });
+
+  try {
+    const capture = await createMessage(harness, {
+      content: "Ibrahim is active, then inactive, and we need to resolve it.",
+      scopeKind: "project",
+      scopeId: "proj-aggregator-atoms",
+    });
+    persistPatchForMessage(harness.contextOS, capture, {
+      entities: [
+        { label: "Ibrahim", kind: "person" },
+      ],
+      observations: [
+        {
+          category: "fact",
+          subjectLabel: "Ibrahim",
+          detail: "Ibrahim is active",
+          confidence: 0.9,
+          sourceSpan: "Ibrahim is active",
+          metadata: { tags: ["status"] },
+        },
+        {
+          category: "fact",
+          subjectLabel: "Ibrahim",
+          detail: "Ibrahim is inactive",
+          confidence: 0.86,
+          sourceSpan: "Ibrahim is inactive",
+          metadata: { tags: ["status"] },
+        },
+        {
+          category: "task",
+          subjectLabel: "Ibrahim",
+          detail: "Resolve the conflicting status updates",
+          confidence: 0.92,
+          sourceSpan: "Resolve the conflicting status updates",
+          metadata: { tags: ["follow_up"] },
+        },
+      ],
+      retrieveHints: [],
+      graphProposals: [],
+      complexityAdjustments: [],
+    });
+
+    await harness.contextOS.waitForBackgroundTasks();
+    const aggregation = harness.contextOS.getIncrementalAggregationData();
+
+    assert.equal(llmCalls.length, 1);
+    assert.equal(aggregation.clusterCount, 1);
+    assert.equal(aggregation.clusters.length, 1);
+
+    const [cluster] = aggregation.clusters;
+    assert.equal(cluster.atomCount, 2);
+    assert.deepEqual(cluster.atoms.map((atom) => atom.type), ["fact", "contradiction"]);
+    assert.deepEqual(cluster.atoms[0].source_observation_ids, cluster.observationIds.slice(0, 2));
+    assert.deepEqual(cluster.atoms[1].source_observation_ids, cluster.observationIds);
+    assert.match(llmCalls[0].prompt, /Ibrahim is active/);
+    assert.match(llmCalls[0].prompt, /Ibrahim is inactive/);
+    assert.match(llmCalls[0].prompt, /Resolve the conflicting status updates/);
   } finally {
     await harness.close();
   }

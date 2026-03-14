@@ -1,6 +1,7 @@
 import path from "node:path";
 import { performance } from "node:perf_hooks";
 
+import { extractAtoms } from "./atom-extraction.js";
 import { ObservationClassifier } from "./classifier.js";
 import { DocumentIndexer } from "./document-indexer.js";
 import { embedBatch, embedText } from "./embeddings.js";
@@ -10,6 +11,7 @@ import { applyDecayToAllClaims } from "./importance-decay.js";
 import { IncrementalAggregator } from "./incremental-aggregator.js";
 import { InjectionGuard } from "./injection-guard.js";
 import { classifyIntent, INTENT_STRATEGIES } from "./intent-router.js";
+import { createLLMClient } from "./llm-client.js";
 import { CLAIM_TYPE_VALUES, LIFECYCLE_STATES } from "./claim-types.js";
 import { normalizeLabel, validateKnowledgePatch } from "./knowledge-patch.js";
 import { PreconsciousBuffer } from "./preconscious.js";
@@ -550,8 +552,16 @@ function countUniqueIds(collections = []) {
   return ids.size;
 }
 
+const MIN_INCREMENTAL_ATOM_CLUSTER_SIZE = 2;
+
 export class ContextOS {
-  constructor({ rootDir, autoBackfillEmbeddings = true, deferInit = false, reviewManagerOptions = {} }) {
+  constructor({
+    rootDir,
+    autoBackfillEmbeddings = true,
+    deferInit = false,
+    reviewManagerOptions = {},
+    llmClient = createLLMClient(),
+  }) {
     this.rootDir = rootDir;
     this.database = new ContextDatabase(path.join(rootDir, "data", "contextos.db"));
     this.telemetry = new TelemetryDatabase(path.join(rootDir, "data", "contextos_telemetry.db"));
@@ -572,6 +582,10 @@ export class ContextOS {
       classifier: this.classifier,
     });
     this.incrementalAggregator = new IncrementalAggregator();
+    this.llmClient = llmClient;
+    this.incrementalClusterAtoms = new Map();
+    this.incrementalClusterAtomTasks = new Map();
+    this.incrementalClusterAtomVersions = new Map();
     this.backgroundTasks = new Set();
     this.embeddingTasks = new Map();
     this.startupEmbeddingBackfill = null;
@@ -664,7 +678,75 @@ export class ContextOS {
       topics,
     });
 
+    const clusterId = this.incrementalAggregator.observationToCluster.get(stored.id);
+    this.scheduleIncrementalClusterAtomExtraction(clusterId);
+
     return stored;
+  }
+
+  scheduleIncrementalClusterAtomExtraction(clusterId) {
+    if (!this.llmClient || clusterId === null || clusterId === undefined) {
+      return null;
+    }
+
+    const nextVersion = (this.incrementalClusterAtomVersions.get(clusterId) ?? 0) + 1;
+    this.incrementalClusterAtomVersions.set(clusterId, nextVersion);
+
+    if (this.incrementalClusterAtomTasks.has(clusterId)) {
+      return this.incrementalClusterAtomTasks.get(clusterId);
+    }
+
+    const task = this.trackBackgroundTask((async () => {
+      await Promise.resolve();
+
+      let processedVersion = -1;
+      while (true) {
+        const targetVersion = this.incrementalClusterAtomVersions.get(clusterId) ?? 0;
+        if (targetVersion === processedVersion) {
+          break;
+        }
+
+        processedVersion = targetVersion;
+        const atoms = await this.extractIncrementalClusterAtoms(clusterId);
+        this.incrementalClusterAtoms.set(clusterId, atoms);
+      }
+    })());
+
+    this.incrementalClusterAtomTasks.set(clusterId, task);
+    task.finally(() => {
+      if (this.incrementalClusterAtomTasks.get(clusterId) === task) {
+        this.incrementalClusterAtomTasks.delete(clusterId);
+      }
+    });
+
+    return task;
+  }
+
+  getObservationsForIncrementalCluster(clusterId) {
+    const cluster = this.incrementalAggregator.getClusterMeta(clusterId);
+    if (!cluster) {
+      return [];
+    }
+
+    return cluster.observationIds
+      .map((observationId) => this.database.getObservation(observationId))
+      .filter(Boolean)
+      .map((observation) => ({
+        id: observation.id,
+        timestamp: observation.created_at ?? new Date().toISOString(),
+        text: String(observation.detail ?? observation.predicate ?? "").trim(),
+        confidence: clamp(Number(observation.confidence ?? 0.5), 0, 1),
+      }))
+      .filter((observation) => observation.text);
+  }
+
+  async extractIncrementalClusterAtoms(clusterId) {
+    const observations = this.getObservationsForIncrementalCluster(clusterId);
+    if (observations.length < MIN_INCREMENTAL_ATOM_CLUSTER_SIZE) {
+      return [];
+    }
+
+    return extractAtoms(observations, this.llmClient);
   }
 
   getIncrementalAggregationData() {
@@ -675,6 +757,11 @@ export class ContextOS {
         if (!cluster) {
           return null;
         }
+
+        const atoms = (this.incrementalClusterAtoms.get(clusterId) ?? []).map((atom) => ({
+          ...atom,
+          source_observation_ids: [...(atom.source_observation_ids ?? [])],
+        }));
 
         return {
           clusterId: cluster.clusterId,
@@ -688,6 +775,8 @@ export class ContextOS {
           contradictions: cluster.contradictions,
           contradictionCount: cluster.contradictions.length,
           deduplicatedObservationIds: [...this.incrementalAggregator.getDeduplicated(clusterId)],
+          atoms,
+          atomCount: atoms.length,
         };
       })
       .filter(Boolean);
