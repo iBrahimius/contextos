@@ -588,6 +588,13 @@ export async function handleRequest(contextOS, rootDir, request, response) {
       return;
     }
 
+    if (request.method === "POST" && pathname === "/api/dream-cycle/backfill-levels") {
+      const body = await parseJsonBody(request);
+      const report = await contextOS.backfillClusterLevels(body);
+      sendJson(response, 200, withGraphVersion(report, resolveGraphVersion(contextOS)));
+      return;
+    }
+
     if (request.method === "POST" && pathname === "/api/dream-cycle") {
       const body = await parseJsonBody(request);
       const report = await contextOS.dreamCycle(body);
