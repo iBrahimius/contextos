@@ -39,6 +39,40 @@ function lowerKey(value) {
   return normalizeLabel(value)?.toLowerCase() ?? null;
 }
 
+function normalizeMutationType(value) {
+  return String(value ?? "")
+    .trim()
+    .toLowerCase()
+    .replace(/^add_/, "");
+}
+
+function firstNormalizedLabel(...values) {
+  for (const value of values) {
+    const normalized = normalizeLabel(value);
+    if (normalized) {
+      return normalized;
+    }
+  }
+
+  return null;
+}
+
+function resolveMutationDetail({ type, payload = {}, proposal = null }) {
+  const normalizedType = normalizeMutationType(type ?? payload.type ?? proposal?.proposal_type ?? null);
+  const candidates = [payload.title, payload.detail];
+
+  if (normalizedType === "decision") {
+    candidates.push(payload.choice);
+  }
+
+  if (normalizedType === "constraint") {
+    candidates.push(payload.content);
+  }
+
+  candidates.push(payload.summary, proposal?.detail);
+  return firstNormalizedLabel(...candidates);
+}
+
 function defaultOriginKindForRole(role) {
   if (role === "user") {
     return "user";
@@ -2886,7 +2920,7 @@ export class ContextOS {
       throw new Error(`Unknown source_event_id: ${sourceEventId}`);
     }
 
-    const detail = normalizeLabel(payload.title ?? payload.detail ?? payload.summary ?? null);
+    const detail = resolveMutationDetail({ type, payload });
     const normalizedConfidence = clamp(Number(confidence) || 0.5, 0, 1);
     const writeClass = classifyWriteClass(type);
     const disposition = getWriteClassDisposition(writeClass);
@@ -3000,10 +3034,7 @@ export class ContextOS {
 
   applyGraphProposal(proposal, { actorId = "system" } = {}) {
     const payload = parseJson(proposal.payload_json, {}) ?? {};
-    const normalizedType = String(payload.type ?? proposal.proposal_type ?? "")
-      .trim()
-      .toLowerCase()
-      .replace(/^add_/, "");
+    const normalizedType = normalizeMutationType(payload.type ?? proposal.proposal_type);
 
     if (normalizedType === "entity") {
       const entity = this.graph.ensureEntity({
@@ -3096,7 +3127,7 @@ export class ContextOS {
       ?? proposal.subject_label,
     );
     const entity = entityLabel ? this.graph.ensureEntity({ label: entityLabel, kind: payload.entityKind ?? payload.entity_kind ?? "concept" }) : null;
-    const detail = normalizeLabel(payload.title ?? payload.detail ?? proposal.detail);
+    const detail = resolveMutationDetail({ type: normalizedType, payload, proposal });
     const confidence = clamp(Number(payload.confidence ?? proposal.confidence ?? 0.8), 0, 1);
 
     if (!detail) {
