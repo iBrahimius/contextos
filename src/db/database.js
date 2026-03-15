@@ -3649,7 +3649,7 @@ export class ContextDatabase {
       .filter(Boolean);
   }
 
-  listGraphProposals({
+  _buildGraphProposalFilters({
     status = null,
     statuses = null,
     writeClass = null,
@@ -3661,8 +3661,6 @@ export class ContextDatabase {
     maxConfidence = null,
     queueBucket = null,
     createdBefore = null,
-    sort = "newest",
-    limit = 100,
   } = {}) {
     const normalizeValues = (value) => Array.isArray(value)
       ? value.map((entry) => String(entry ?? "").trim()).filter(Boolean)
@@ -3685,6 +3683,7 @@ export class ContextDatabase {
 
     const clauses = [];
     const params = [];
+    let needsMessageJoin = false;
 
     if (normalizedStatuses.length) {
       clauses.push(`gp.status IN (${normalizedStatuses.map(() => "?").join(", ")})`);
@@ -3705,6 +3704,7 @@ export class ContextDatabase {
     if (normalizedSourceEventId) {
       clauses.push(`m.ingest_id = ?`);
       params.push(normalizedSourceEventId);
+      needsMessageJoin = true;
     }
 
     const hasMinConfidence = minConfidence !== null && minConfidence !== undefined && String(minConfidence).trim() !== "";
@@ -3745,6 +3745,25 @@ export class ContextDatabase {
     }
 
     const whereClause = clauses.length ? `WHERE ${clauses.join(" AND ")}` : "";
+    return { whereClause, params, needsMessageJoin };
+  }
+
+  countGraphProposals(options = {}) {
+    const { whereClause, params, needsMessageJoin } = this._buildGraphProposalFilters(options);
+    const joinClause = needsMessageJoin ? "\n      LEFT JOIN messages m ON m.id = gp.message_id" : "";
+    return Number(this.prepare(`
+      SELECT COUNT(*) AS count
+      FROM graph_proposals gp${joinClause}
+      ${whereClause}
+    `).get(...params)?.count ?? 0);
+  }
+
+  listGraphProposals({
+    sort = "newest",
+    limit = 100,
+    ...filterOptions
+  } = {}) {
+    const { whereClause, params, needsMessageJoin } = this._buildGraphProposalFilters(filterOptions);
     const sortDirection = String(sort ?? "newest").trim().toLowerCase() === "oldest" ? "ASC" : "DESC";
     const hasExplicitLimit = limit !== null && limit !== undefined && String(limit).trim() !== "";
     const resolvedLimit = hasExplicitLimit && Number.isFinite(Number(limit))

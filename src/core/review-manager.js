@@ -430,11 +430,10 @@ export class ReviewManager {
       return this.processReview(input);
     }
 
-    const parkedRows = this.database.listGraphProposals({
+    const parkedCount = Number(this.database.countGraphProposals({
       statuses: ["pending", "proposed"],
       queueBucket: "parked",
-      limit: null,
-    });
+    }) ?? 0);
     const reviewStartedAtMs = toTimestamp(input.reviewStartedAt) ?? this.now();
     const autoApplyProposalTypes = expandProposalTypes(this.autoApplyTypes);
     const autoApplyMutationIds = autoApplyProposalTypes.length
@@ -472,7 +471,7 @@ export class ReviewManager {
         actorId: this.actorId,
       })
       : this._emptyBatchReview("reject_batch", "rejected", autoExpireReason);
-    const parkedTotal = parkedRows.length;
+    const parkedTotal = parkedCount;
     const reviewedTotal = Math.max(0, Number(input.queueStats?.total ?? this.database.getPendingGraphProposalStats().total));
     const actionableTotal = Math.max(0, reviewedTotal - parkedTotal);
     const remainingTotal = Math.max(0, reviewedTotal - autoApplied.count - autoExpired.count);

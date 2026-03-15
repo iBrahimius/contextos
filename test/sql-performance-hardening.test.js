@@ -261,3 +261,25 @@ test("listGraphProposals filters by createdBefore", async () => {
     await cleanupTestDB(db, root);
   }
 });
+
+test("countGraphProposals returns count without loading rows", async () => {
+  const { db, root } = await createTestDB();
+
+  try {
+    insertProposal(db, { confidence: 0.4, writeClass: "ai_proposed", status: "proposed" });
+    insertProposal(db, { confidence: 0.3, writeClass: "ai_proposed", status: "proposed" });
+    insertProposal(db, { confidence: 0.9, writeClass: "ai_proposed", status: "proposed" });
+    insertProposal(db, { confidence: 0.2, writeClass: "canonical", status: "pending" });
+
+    const parkedCount = db.countGraphProposals({ statuses: ["pending", "proposed"], queueBucket: "parked" });
+    const actionableCount = db.countGraphProposals({ statuses: ["pending", "proposed"], queueBucket: "actionable" });
+    const totalCount = db.countGraphProposals({});
+
+    assert.equal(parkedCount, 2);
+    assert.equal(actionableCount, 2);
+    assert.equal(totalCount, 4);
+    assert.equal(typeof parkedCount, "number");
+  } finally {
+    await cleanupTestDB(db, root);
+  }
+});
