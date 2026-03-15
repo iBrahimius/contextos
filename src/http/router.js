@@ -841,12 +841,15 @@ export async function handleRequest(contextOS, rootDir, request, response) {
       const kind = url.searchParams.get("kind") || null;
       
       const result = contextOS.database.listEntitiesByKind(kind, pagination);
-      const entities = (result.items ?? result ?? []).map((entity) => {
+      // Handle both paginated result object and plain array
+      const resultList = result.items ?? result ?? [];
+      
+      const entities = resultList.map((entity) => {
         // Get top 5 claims mentioning this entity
         const claims = contextOS.database.getClaimsByEntityLabel(entity.label, { limit: 5 }) ?? [];
         const claimsData = claims.slice(0, 5).map((claim) => ({
           id: claim.id,
-          text: claim.value_text ?? claim.detail ?? "",
+          text: claim.value_text ?? "",
           confidence: Number(claim.confidence ?? 0.7),
         }));
 
@@ -866,11 +869,18 @@ export async function handleRequest(contextOS, rootDir, request, response) {
         };
       });
 
+      // Get total count for the kind filter
+      const totalQuery = kind
+        ? `SELECT COUNT(*) as count FROM entities WHERE kind = ?`
+        : `SELECT COUNT(*) as count FROM entities`;
+      const totalCount = contextOS.database.prepare(totalQuery).get(...(kind ? [kind] : []))?.count ?? 0;
+
       const responsePayload = {
         entities,
-        total: contextOS.database.prepare(`SELECT COUNT(*) as count FROM entities${kind ? " WHERE kind = ?" : ""}`).get(kind ? kind : undefined)?.count ?? 0,
+        total: totalCount,
       };
 
+      // Add pagination cursors if present
       if (result.nextCursor) {
         responsePayload.cursor = result.nextCursor;
         responsePayload.has_more = result.hasMore ?? false;
