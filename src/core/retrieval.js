@@ -249,7 +249,7 @@ export const RETRIEVAL_ROUTE_PROFILES = {
 
 const ROUTE_SOURCE_KEYS = {
   current_state: {
-    primary: ["claims", "claimsFts", "vectorClaims", "graphCanonical", "registryLexical"],
+    primary: ["entityCards", "claims", "claimsFts", "vectorClaims", "graphCanonical", "registryLexical"],
     secondary: ["graphConversational", "vectorObservations", "vectorMessages", "ftsConversational"],
   },
   history_temporal: {
@@ -261,7 +261,7 @@ const ROUTE_SOURCE_KEYS = {
     secondary: ["vectorMessages", "registryLexical", "clusterLevels"],
   },
   general: {
-    primary: ["graphCanonical", "claims", "claimsFts", "vectorClaims", "registryLexical", "graphConversational", "vectorObservations"],
+    primary: ["entityCards", "graphCanonical", "claims", "claimsFts", "vectorClaims", "registryLexical", "graphConversational", "vectorObservations"],
     secondary: ["vectorMessages", "ftsConversational", "clusterLevels"],
   },
 };
@@ -285,6 +285,13 @@ const WHY_ROUTE_PATTERNS = [
 const HISTORY_ROUTE_PATTERNS = [
   /^(?:what happened\b|when did\b|when was\b|timeline of\b|history of\b|what changes were made\b|what changed\b|what did we build\b)/i,
   /\bwhat was decided about\b/i,
+];
+
+const LISTING_QUERY_PATTERNS = [
+  /\b(?:all|every|each|list)\b.*\b(?:projects?|systems?|tools?|people|persons?|entities?)\b/i,
+  /\blist\s+(?:all\s+)?(?:the\s+)?\w+/i,
+  /\bwhat\s+(?:are\s+)?(?:all|the)\s+\w+s\b/i,
+  /\bshow\s+(?:me\s+)?(?:all|every)\b/i,
 ];
 
 const CURRENT_STATE_ROUTE_PATTERNS = [
@@ -426,6 +433,46 @@ function isoTimestamp(date) {
     : null;
 }
 
+function detectListingIntent(queryText) {
+  const normalizedQuery = String(queryText ?? "").trim();
+  if (!LISTING_QUERY_PATTERNS.some((pattern) => pattern.test(normalizedQuery))) {
+    return null;
+  }
+
+  // Extract entity kind from query: "all projects" → "project", "list tools" → "tool", etc.
+  const singularToKind = {
+    project: "project",
+    system: "system",
+    tool: "tool",
+    person: "person",
+    entity: null,
+  };
+  const pluralToKind = {
+    projects: "project",
+    systems: "system",
+    tools: "tool",
+    people: "person",
+    persons: "person",
+    entities: null,
+  };
+
+  for (const [word, kind] of Object.entries(singularToKind)) {
+    const pattern = new RegExp(`\\b${word}\\b`, "i");
+    if (pattern.test(normalizedQuery)) {
+      return kind;
+    }
+  }
+
+  for (const [word, kind] of Object.entries(pluralToKind)) {
+    const pattern = new RegExp(`\\b${word}\\b`, "i");
+    if (pattern.test(normalizedQuery)) {
+      return kind;
+    }
+  }
+
+  return null;
+}
+
 function collectRouteSignals(queryText) {
   const normalizedQuery = String(queryText ?? "").trim();
   const signals = [];
@@ -438,6 +485,10 @@ function collectRouteSignals(queryText) {
   }
   if (CURRENT_STATE_ROUTE_PATTERNS.some((pattern) => pattern.test(normalizedQuery))) {
     signals.push({ route: "current_state", confidence: 0.88, reason: "matched_current_state_query" });
+  }
+  if (LISTING_QUERY_PATTERNS.some((pattern) => pattern.test(normalizedQuery))) {
+    signals.push({ route: "current_state", confidence: 0.82, reason: "matched_listing_query" });
+    signals.push({ route: "general", confidence: 0.65, reason: "matched_listing_query" });
   }
   if (GENERAL_ROUTE_PATTERNS.some((pattern) => pattern.test(normalizedQuery))) {
     signals.push({ route: "general", confidence: 0.7, reason: "matched_general_query" });
@@ -889,6 +940,9 @@ export function planRetrievalRoute(queryText, { queryProfile = null, seedEntitie
 export function classifyRetrievalRoute(queryText, options = {}) {
   return planRetrievalRoute(queryText, options).route;
 }
+
+export { detectListingIntent };
+export { LISTING_QUERY_PATTERNS };
 
 function isMessageLikeType(type) {
   return type.endsWith("_message") || type === "message";
@@ -2305,6 +2359,62 @@ export class RetrievalEngine {
     return misses;
   }
 
+  retrieveEntityCards(queryText, scopeFilter = null) {
+    // Detect listing intent and kind
+    const listingKind = detectListingIntent(queryText);
+    if (!LISTING_QUERY_PATTERNS.some((pattern) => pattern.test(queryText))) {
+      return [];
+    }
+
+    // List entities, capped at 20, ordered by complexity_score DESC, mention_count DESC, label ASC
+    let entities = this.graph.listEntities()
+      .filter((entity) => !listingKind || entity.kind === listingKind)
+      .slice(0, 20);
+
+    // Filter by scope
+    if (scopeFilter) {
+      entities = entities.filter((entity) => matchesScopeFilter(entity, scopeFilter, "shared"));
+    }
+
+    // Build entity cards with top 5 claims and relationship count
+    return entities.map((entity) => {
+      // Get top 5 claims mentioning this entity
+      const claims = this.database.getClaimsByEntityLabel(entity.label, { limit: 5 }) ?? [];
+      const claimsData = claims.slice(0, 5).map((claim) => ({
+        id: claim.id,
+        text: claim.value_text ?? "",
+        confidence: Number(claim.confidence ?? 0.7),
+      }));
+
+      // Get relationship count
+      const relationships = this.database.listRelationshipsForEntity(entity.id) ?? [];
+      const relationshipCount = relationships.length;
+
+      // Score based on complexity_score (higher complexity = higher score)
+      const score = Math.max(0.3, 0.45 + Math.min(1.5, (entity.complexityScore ?? 1) / 20));
+
+      return decorateRetrievalResult({
+        type: "entity_card",
+        id: entity.id,
+        entityId: entity.id,
+        score,
+        summary: entity.summary ?? entity.label,
+        payload: {
+          id: entity.id,
+          label: entity.label,
+          kind: entity.kind,
+          summary: entity.summary,
+          complexity_score: entity.complexityScore,
+          mention_count: entity.mentionCount,
+          claims: claimsData,
+          relationship_count: relationshipCount,
+        },
+        tokenCount: estimateTokens(entity.summary ?? entity.label),
+        hintIds: [],
+      }, "canonical");
+    });
+  }
+
   retrieveClaims(seedEntities, scopeFilter = null) {
     const seedEntityIds = seedEntities.map((entity) => entity.id);
     if (!seedEntityIds.length) {
@@ -2627,6 +2737,9 @@ export class RetrievalEngine {
           }, "vector"))
       : [];
 
+    // Entity cards for listing queries
+    const entityCardResults = this.retrieveEntityCards(queryText, resolvedScopeFilter);
+
     const sourceLists = {
       graphCanonical: dedupeResults([
         ...entityResults,
@@ -2650,6 +2763,7 @@ export class RetrievalEngine {
       claimsFts: dedupeResults(claimsFtsResults),
       vectorClaims: dedupeResults(claimVectorResults),
       registryLexical: dedupeResults(registryLexicalResults),
+      entityCards: dedupeResults(entityCardResults),
     };
 
     const { lists: routeRrfListsRaw, diagnostics: routeSelectionDiagnostics } = buildRouteAwareRrfLists(routePlan, sourceLists);

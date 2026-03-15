@@ -836,6 +836,60 @@ export async function handleRequest(contextOS, rootDir, request, response) {
       return;
     }
 
+    if (request.method === "GET" && pathname === "/api/entities/list") {
+      const pagination = parsePaginationParams(url.searchParams);
+      const kind = url.searchParams.get("kind") || null;
+      
+      const result = contextOS.database.listEntitiesByKind(kind, pagination);
+      // Handle both paginated result object and plain array
+      const resultList = result.items ?? result ?? [];
+      
+      const entities = resultList.map((entity) => {
+        // Get top 5 claims mentioning this entity
+        const claims = contextOS.database.getClaimsByEntityLabel(entity.label, { limit: 5 }) ?? [];
+        const claimsData = claims.slice(0, 5).map((claim) => ({
+          id: claim.id,
+          text: claim.value_text ?? "",
+          confidence: Number(claim.confidence ?? 0.7),
+        }));
+
+        // Get relationship count
+        const relationships = contextOS.database.listRelationshipsForEntity(entity.id) ?? [];
+        const relationshipCount = relationships.length;
+
+        return {
+          id: entity.id,
+          label: entity.label,
+          kind: entity.kind,
+          summary: entity.summary,
+          complexity_score: entity.complexity_score,
+          mention_count: entity.mention_count,
+          claims: claimsData,
+          relationship_count: relationshipCount,
+        };
+      });
+
+      // Get total count for the kind filter
+      const totalQuery = kind
+        ? `SELECT COUNT(*) as count FROM entities WHERE kind = ?`
+        : `SELECT COUNT(*) as count FROM entities`;
+      const totalCount = contextOS.database.prepare(totalQuery).get(...(kind ? [kind] : []))?.count ?? 0;
+
+      const responsePayload = {
+        entities,
+        total: totalCount,
+      };
+
+      // Add pagination cursors if present
+      if (result.nextCursor) {
+        responsePayload.cursor = result.nextCursor;
+        responsePayload.has_more = result.hasMore ?? false;
+      }
+
+      sendJson(response, 200, withGraphVersion(responsePayload, resolveGraphVersion(contextOS)));
+      return;
+    }
+
     if (request.method === "GET" && pathname.startsWith("/api/entities/")) {
       const name = decodeURIComponent(pathname.replace("/api/entities/", ""));
       const detail = contextOS.getEntityDetail(name, {

@@ -1938,6 +1938,41 @@ export class ContextDatabase {
     `).all(...params);
   }
 
+  listEntitiesByKind(kind, optionsOrLimit = null) {
+    const request = resolveListMode(optionsOrLimit);
+    const kindFilter = kind ? ` AND kind = ?` : "";
+
+    if (request.mode === "pagination") {
+      const { sql, params } = paginationClause({
+        cursor: request.cursor,
+        limit: request.limit,
+        orderBy: "complexity_score",
+        direction: "DESC",
+      });
+      const baseParams = kind ? [kind] : [];
+      const rows = this.prepare(`
+        SELECT
+          *,
+          complexity_score AS _cursor_key
+        FROM entities
+        WHERE 1 = 1${kindFilter}${sql}
+      `).all(...baseParams, ...params);
+      return paginateResults(rows, request.limit);
+    }
+
+    const params = request.mode === "legacy"
+      ? (kind ? [kind, request.limit] : [request.limit])
+      : (kind ? [kind] : []);
+    const limitClause = request.mode === "legacy" ? "\n      LIMIT ?\n    " : "";
+
+    return this.prepare(`
+      SELECT *
+      FROM entities
+      WHERE 1 = 1${kindFilter}
+      ORDER BY complexity_score DESC, mention_count DESC, label ASC${limitClause}
+    `).all(...params);
+  }
+
   insertRelationship({ subjectEntityId, predicate, objectEntityId, weight = 1, provenanceMessageId = null, metadata = null }) {
     const id = createId("rel");
     const createdAt = nowIso();
@@ -3489,6 +3524,41 @@ export class ContextDatabase {
     `)
       .all(queryText)
       .filter((row) => scopeMatches(row, scopeFilter, "private"));
+  }
+
+  getClaimsByEntityLabel(label, { limit = 5 } = {}) {
+    if (!label?.trim()) {
+      return [];
+    }
+
+    const normalizedLabel = String(label ?? "").trim().toLowerCase();
+    const maxLimit = Math.min(Math.max(1, Math.trunc(Number(limit) || 5)), 50);
+
+    return this.prepare(`
+      SELECT
+        c.id,
+        c.claim_type,
+        c.value_text,
+        c.lifecycle_state,
+        c.confidence,
+        c.importance_score,
+        c.subject_entity_id,
+        c.object_entity_id,
+        c.predicate,
+        c.scope_kind,
+        c.scope_id,
+        c.created_at,
+        c.valid_from,
+        c.valid_to
+      FROM claims c
+      JOIN entities e ON (c.subject_entity_id = e.id OR c.object_entity_id = e.id)
+      WHERE LOWER(e.label) = ?
+        AND c.lifecycle_state IN ('active', 'candidate', 'disputed')
+        AND c.superseded_by_claim_id IS NULL
+      ORDER BY c.importance_score DESC, c.created_at DESC
+      LIMIT ?
+    `)
+      .all(normalizedLabel, maxLimit);
   }
 
   listChunksForEntities(entityIds, scopeFilterOrOptions = null, maybeOptions = null) {
