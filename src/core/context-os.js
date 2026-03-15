@@ -1020,6 +1020,7 @@ export class ContextOS {
 
       const observationRecords = [];
       const graphProposalIds = [];
+      let queuedGraphProposalCount = 0;
       const retrievalHintIds = [];
       const claimStats = {
         created: 0,
@@ -1045,6 +1046,9 @@ export class ContextOS {
         });
         this.graph.updateGraphVersion(storedProposal.graphVersion);
         graphProposalIds.push(storedProposal.id);
+        if (!storedProposal.deduplicated) {
+          queuedGraphProposalCount += 1;
+        }
       }
 
       for (const observation of patch.observations) {
@@ -1067,6 +1071,9 @@ export class ContextOS {
           });
           this.graph.updateGraphVersion(storedProposal.graphVersion);
           graphProposalIds.push(storedProposal.id);
+          if (!storedProposal.deduplicated) {
+            queuedGraphProposalCount += 1;
+          }
           continue;
         }
 
@@ -1241,9 +1248,9 @@ export class ContextOS {
         }
       }
 
-      if (graphProposalIds.length) {
+      if (queuedGraphProposalCount > 0) {
         this.reviewManager.noteQueuedMutations({
-          count: graphProposalIds.length,
+          count: queuedGraphProposalCount,
           source: "persist_knowledge_patch",
         });
       }
@@ -2985,10 +2992,12 @@ export class ContextOS {
       }
     }
 
-    this.reviewManager.noteQueuedMutations({
-      count: 1,
-      source: "propose_mutation",
-    });
+    if (!stored.deduplicated) {
+      this.reviewManager.noteQueuedMutations({
+        count: 1,
+        source: "propose_mutation",
+      });
+    }
 
     return {
       ok: true,

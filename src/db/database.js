@@ -18,6 +18,20 @@ function normalizeQueueBucket(value) {
   return ["actionable", "parked", "not_queued"].includes(normalized) ? normalized : null;
 }
 
+function cleanGraphProposalTextValue(value) {
+  if (value === null || value === undefined) {
+    return null;
+  }
+
+  const normalized = String(value).trim();
+  return normalized || null;
+}
+
+function normalizeGraphProposalComparisonValue(value) {
+  const cleaned = cleanGraphProposalTextValue(value);
+  return cleaned ? cleaned.toLowerCase() : null;
+}
+
 function serializeEmbedding(embedding) {
   if (!embedding) {
     return null;
@@ -406,6 +420,7 @@ const SCHEMA_INDEXES = [
   `CREATE INDEX IF NOT EXISTS idx_graph_proposals_created ON graph_proposals(created_at DESC)`,
   `CREATE INDEX IF NOT EXISTS idx_graph_proposals_write_class ON graph_proposals(write_class, status)`,
   `CREATE INDEX IF NOT EXISTS idx_graph_proposals_confidence ON graph_proposals(confidence, status)`,
+  `CREATE INDEX IF NOT EXISTS idx_graph_proposals_dedup ON graph_proposals(proposal_type, subject_label, object_label, status)`,
 ];
 
 export class ContextDatabase {
@@ -3542,6 +3557,62 @@ export class ContextDatabase {
       .filter((row) => scopeMatches(row, scopeFilter, "shared"));
   }
 
+  _normalizeGraphProposalDedupFields({ subjectLabel = null, predicate = null, objectLabel = null, detail = null }) {
+    return {
+      subjectLabel: normalizeGraphProposalComparisonValue(subjectLabel),
+      predicate: normalizeGraphProposalComparisonValue(predicate),
+      objectLabel: normalizeGraphProposalComparisonValue(objectLabel),
+      detail: normalizeGraphProposalComparisonValue(detail),
+    };
+  }
+
+  _findGraphProposalDuplicate({ proposalType, subjectLabel = null, predicate = null, objectLabel = null, detail = null }) {
+    const normalizedFields = this._normalizeGraphProposalDedupFields({
+      subjectLabel,
+      predicate,
+      objectLabel,
+      detail,
+    });
+
+    const candidateClauses = [
+      `proposal_type = ?`,
+      `status IN ('pending', 'proposed')`,
+    ];
+    const candidateParams = [proposalType];
+
+    for (const [column, value] of Object.entries({
+      subject_label: normalizedFields.subjectLabel,
+      predicate: normalizedFields.predicate,
+      object_label: normalizedFields.objectLabel,
+      detail: normalizedFields.detail,
+    })) {
+      candidateClauses.push(value === null ? `${column} IS NULL` : `${column} IS NOT NULL`);
+    }
+
+    const candidates = this.prepare(`
+      SELECT
+        id,
+        confidence,
+        scope_kind AS scopeKind,
+        scope_id AS scopeId,
+        subject_label AS subjectLabel,
+        predicate,
+        object_label AS objectLabel,
+        detail
+      FROM graph_proposals INDEXED BY idx_graph_proposals_dedup
+      WHERE ${candidateClauses.join(" AND ")}
+      ORDER BY confidence DESC, created_at ASC
+    `).all(...candidateParams);
+
+    return candidates.find((candidate) => {
+      const normalizedCandidate = this._normalizeGraphProposalDedupFields(candidate);
+      return normalizedCandidate.subjectLabel === normalizedFields.subjectLabel
+        && normalizedCandidate.predicate === normalizedFields.predicate
+        && normalizedCandidate.objectLabel === normalizedFields.objectLabel
+        && normalizedCandidate.detail === normalizedFields.detail;
+    }) ?? null;
+  }
+
   insertGraphProposal({
     conversationId = null,
     messageId = null,
@@ -3560,41 +3631,89 @@ export class ContextDatabase {
     payload,
     writeClass = "ai_proposed",
   }) {
-    const id = createId("gp");
+    const cleanedProposalType = cleanGraphProposalTextValue(proposalType);
+    const cleanedSubjectLabel = cleanGraphProposalTextValue(subjectLabel);
+    const cleanedPredicate = cleanGraphProposalTextValue(predicate);
+    const cleanedObjectLabel = cleanGraphProposalTextValue(objectLabel);
+    const cleanedDetail = cleanGraphProposalTextValue(detail);
+    const cleanedReason = cleanGraphProposalTextValue(reason);
 
-    this.prepare(`
-      INSERT INTO graph_proposals (
-        id, conversation_id, message_id, source_run_id, actor_id, scope_kind, scope_id, proposal_type,
-        subject_label, predicate, object_label, detail, confidence, status, reason, payload_json,
-        created_at, reviewed_by_actor, reviewed_at, accepted_at, write_class
-      )
-      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-    `).run(
-      id,
-      conversationId,
-      messageId,
-      sourceRunId,
-      actorId,
-      scopeKind,
-      scopeId,
-      proposalType,
-      subjectLabel,
-      predicate,
-      objectLabel,
-      detail,
-      confidence,
-      status,
-      reason,
-      stableJson(payload),
-      nowIso(),
-      null,
-      null,
-      null,
-      writeClass,
-    );
+    return this.withTransaction(() => {
+      const existingProposal = this._findGraphProposalDuplicate({
+        proposalType: cleanedProposalType,
+        subjectLabel: cleanedSubjectLabel,
+        predicate: cleanedPredicate,
+        objectLabel: cleanedObjectLabel,
+        detail: cleanedDetail,
+      });
 
-    const graphVersion = this.bumpGraphVersion();
-    return { id, scopeKind, scopeId, graphVersion };
+      if (existingProposal) {
+        const existingConfidence = Number(existingProposal.confidence ?? 0);
+        const graphVersion = this.getGraphVersion();
+
+        if (Number(confidence) > existingConfidence) {
+          this.prepare(`
+            UPDATE graph_proposals
+            SET confidence = ?
+            WHERE id = ?
+          `).run(confidence, existingProposal.id);
+
+          return {
+            id: existingProposal.id,
+            scopeKind: existingProposal.scopeKind,
+            scopeId: existingProposal.scopeId,
+            graphVersion,
+            deduplicated: true,
+          };
+        }
+
+        return {
+          id: existingProposal.id,
+          scopeKind: existingProposal.scopeKind,
+          scopeId: existingProposal.scopeId,
+          graphVersion,
+          deduplicated: true,
+          skipped: true,
+        };
+      }
+
+      const id = createId("gp");
+      const createdAt = nowIso();
+
+      this.prepare(`
+        INSERT INTO graph_proposals (
+          id, conversation_id, message_id, source_run_id, actor_id, scope_kind, scope_id, proposal_type,
+          subject_label, predicate, object_label, detail, confidence, status, reason, payload_json,
+          created_at, reviewed_by_actor, reviewed_at, accepted_at, write_class
+        )
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+      `).run(
+        id,
+        conversationId,
+        messageId,
+        sourceRunId,
+        actorId,
+        scopeKind,
+        scopeId,
+        cleanedProposalType,
+        cleanedSubjectLabel,
+        cleanedPredicate,
+        cleanedObjectLabel,
+        cleanedDetail,
+        confidence,
+        status,
+        cleanedReason,
+        stableJson(payload),
+        createdAt,
+        null,
+        null,
+        null,
+        writeClass,
+      );
+
+      const graphVersion = this.bumpGraphVersion();
+      return { id, scopeKind, scopeId, graphVersion, deduplicated: false };
+    });
   }
 
   updateGraphProposalStatus(id, { status, reason = null, actorId = "system" }) {

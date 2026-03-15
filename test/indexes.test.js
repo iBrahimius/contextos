@@ -53,6 +53,7 @@ test("Database includes all required indexes", async () => {
       "idx_graph_proposals_created",
       "idx_graph_proposals_write_class",
       "idx_graph_proposals_confidence",
+      "idx_graph_proposals_dedup",
     ];
 
     for (const idx of required) {
@@ -74,11 +75,13 @@ test("SQL performance hardening indexes exist in sqlite_master", async () => {
         "idx_claims_observation",
         "idx_graph_proposals_write_class",
         "idx_graph_proposals_confidence",
+        "idx_graph_proposals_dedup",
       ].filter((name) => indexes.includes(name)),
       [
         "idx_claims_observation",
         "idx_graph_proposals_write_class",
         "idx_graph_proposals_confidence",
+        "idx_graph_proposals_dedup",
       ],
     );
   } finally {
@@ -138,6 +141,21 @@ test("idx_graph_proposals_created is used for proposal time queries", async () =
     );
 
     assert.match(plan, /idx_graph_proposals_created/, "Query should use idx_graph_proposals_created");
+  } finally {
+    await cleanupDB(db, tmpDir);
+  }
+});
+
+test("idx_graph_proposals_dedup is used for proposal dedup candidate lookups", async () => {
+  const { db, tmpDir } = await createTestDB();
+
+  try {
+    const plan = getQueryPlan(
+      db,
+      "SELECT id FROM graph_proposals INDEXED BY idx_graph_proposals_dedup WHERE proposal_type = 'relationship' AND status IN ('pending', 'proposed') AND subject_label IS NOT NULL AND predicate IS NOT NULL AND object_label IS NOT NULL AND detail IS NOT NULL ORDER BY confidence DESC, created_at ASC",
+    );
+
+    assert.match(plan, /idx_graph_proposals_dedup/, "Dedup lookup should use idx_graph_proposals_dedup");
   } finally {
     await cleanupDB(db, tmpDir);
   }
