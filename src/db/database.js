@@ -3775,10 +3775,12 @@ export class ContextDatabase {
       params.push(resolvedLimit);
     }
 
+    const selectClause = needsMessageJoin ? "gp.*, m.ingest_id AS source_event_id" : "gp.*, NULL AS source_event_id";
+    const joinClause = needsMessageJoin ? "\n      LEFT JOIN messages m ON m.id = gp.message_id" : "";
+
     return this.prepare(`
-      SELECT gp.*, m.ingest_id AS source_event_id
-      FROM graph_proposals gp
-      LEFT JOIN messages m ON m.id = gp.message_id
+      SELECT ${selectClause}
+      FROM graph_proposals gp${joinClause}
       ${whereClause}
       ORDER BY gp.created_at ${sortDirection}, gp.id ${sortDirection}${limitClause}
     `).all(...params);

@@ -1254,16 +1254,16 @@
     ]
   },
   {
-    "timestamp": "2026-03-15T12:32:25.089Z",
+    "timestamp": "2026-03-15T12:35:35.668Z",
     "label": "baseline",
     "queryCount": 22,
     "avgPrecisionAt5": 0.436,
     "avgMRR": 0.652,
     "passRate": 0.727,
-    "artifactLeakRate": 0.136,
+    "artifactLeakRate": 0.091,
     "p50LatencyMs": null,
     "p95LatencyMs": null,
-    "totalDurationMs": 4780,
+    "totalDurationMs": 4669,
     "byIntent": {
       "simple": {
         "count": 8,
@@ -1277,7 +1277,7 @@
         "avgPrecision": 0.302,
         "avgMRR": 0.563,
         "passRate": 0.75,
-        "artifactLeakRate": 0.125
+        "artifactLeakRate": 0
       },
       "deep": {
         "count": 6,
@@ -1300,7 +1300,7 @@
         "avgPrecision": 0.181,
         "avgMRR": 0.333,
         "passRate": 0.5,
-        "artifactLeakRate": 0.333
+        "artifactLeakRate": 0.167
       },
       "why_explanatory": {
         "count": 3,
@@ -1473,10 +1473,8 @@
         "precisionAt5": 0,
         "mrr": 0,
         "pass": false,
-        "typeMatch": true,
-        "artifactViolations": [
-          "term:launchd"
-        ],
+        "typeMatch": false,
+        "artifactViolations": [],
         "familyCounts": {
           "conversational": 5
         }
