@@ -372,6 +372,7 @@ CREATE TABLE IF NOT EXISTS graph_proposals (
 CREATE INDEX IF NOT EXISTS idx_graph_proposals_status ON graph_proposals(status, created_at DESC);
 CREATE INDEX IF NOT EXISTS idx_graph_proposals_write_class ON graph_proposals(write_class, status);
 CREATE INDEX IF NOT EXISTS idx_graph_proposals_confidence ON graph_proposals(confidence, status);
+CREATE INDEX IF NOT EXISTS idx_graph_proposals_dedup ON graph_proposals(proposal_type, subject_label, object_label, status);
 
 CREATE TABLE IF NOT EXISTS system_state (
   key TEXT PRIMARY KEY,

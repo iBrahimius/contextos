@@ -266,10 +266,30 @@ test("countGraphProposals returns count without loading rows", async () => {
   const { db, root } = await createTestDB();
 
   try {
-    insertProposal(db, { confidence: 0.4, writeClass: "ai_proposed", status: "proposed" });
-    insertProposal(db, { confidence: 0.3, writeClass: "ai_proposed", status: "proposed" });
-    insertProposal(db, { confidence: 0.9, writeClass: "ai_proposed", status: "proposed" });
-    insertProposal(db, { confidence: 0.2, writeClass: "canonical", status: "pending" });
+    insertProposal(db, {
+      confidence: 0.4,
+      writeClass: "ai_proposed",
+      status: "proposed",
+      detail: "Parked proposal A",
+    });
+    insertProposal(db, {
+      confidence: 0.3,
+      writeClass: "ai_proposed",
+      status: "proposed",
+      detail: "Parked proposal B",
+    });
+    insertProposal(db, {
+      confidence: 0.9,
+      writeClass: "ai_proposed",
+      status: "proposed",
+      detail: "Actionable proposal",
+    });
+    insertProposal(db, {
+      confidence: 0.2,
+      writeClass: "canonical",
+      status: "pending",
+      detail: "Canonical pending proposal",
+    });
 
     const parkedCount = db.countGraphProposals({ statuses: ["pending", "proposed"], queueBucket: "parked" });
     const actionableCount = db.countGraphProposals({ statuses: ["pending", "proposed"], queueBucket: "actionable" });
