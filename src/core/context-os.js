@@ -12,7 +12,7 @@ import { IncrementalAggregator } from "./incremental-aggregator.js";
 import { InjectionGuard } from "./injection-guard.js";
 import { classifyIntent, INTENT_STRATEGIES } from "./intent-router.js";
 import { createLLMClient } from "./llm-client.js";
-import { generateLevels } from "./lod-compression.js";
+import { generateLevels, persistLevels } from "./lod-compression.js";
 import { detectPatterns } from "./pattern-detection.js";
 import { CLAIM_TYPE_VALUES, LIFECYCLE_STATES } from "./claim-types.js";
 import { normalizeLabel, validateKnowledgePatch } from "./knowledge-patch.js";
@@ -4208,27 +4208,263 @@ export class ContextOS {
     };
   }
 
-  processDreamCycleClusters(clusters) {
+  buildClusterLevelPromptInputs(cluster, atoms) {
+    const observations = Array.isArray(cluster?.observations) ? cluster.observations : [];
+    const observationById = new Map(
+      observations
+        .filter((observation) => observation?.id)
+        .map((observation) => [observation.id, observation]),
+    );
+    const promptAtoms = (atoms ?? [])
+      .map((atom) => {
+        const text = String(atom?.text ?? "").trim();
+        if (!text) {
+          return null;
+        }
+
+        const confidence = (atom?.source_observation_ids ?? [])
+          .map((observationId) => Number(observationById.get(observationId)?.confidence))
+          .find((value) => Number.isFinite(value));
+
+        return {
+          type: atom?.atom_type ?? atom?.type ?? "fact",
+          text,
+          confidence: clamp(Number.isFinite(confidence) ? confidence : 0.7, 0, 1),
+        };
+      })
+      .filter(Boolean);
+    const promptObservations = observations
+      .map((observation) => {
+        const text = String(observation?.detail ?? observation?.predicate ?? "").trim();
+        if (!observation?.id || !text) {
+          return null;
+        }
+
+        return {
+          id: observation.id,
+          text,
+        };
+      })
+      .filter(Boolean);
+
+    return {
+      promptAtoms,
+      promptObservations,
+      sourceObservationIds: promptObservations.map((observation) => observation.id),
+    };
+  }
+
+  normalizeClusterLevels(levels) {
+    return {
+      l0: typeof levels?.l0 === "string" ? levels.l0 : String(levels?.l0?.text ?? "").trim(),
+      l1: typeof levels?.l1 === "string" ? levels.l1 : String(levels?.l1?.text ?? "").trim(),
+      l2: typeof levels?.l2 === "string" ? levels.l2 : String(levels?.l2?.text ?? "").trim(),
+    };
+  }
+
+  async processSingleDreamCycleCluster(cluster, { persist = true, allowLlm = true } = {}) {
+    const observationCount = cluster?.observations?.length ?? 0;
+    if (observationCount < 3) {
+      return {
+        status: "skipped",
+        atomsExtracted: 0,
+        levelsGenerated: { l0: 0, l1: 0, l2: 0 },
+      };
+    }
+
+    const atoms = this.extractClusterAtoms(cluster);
+    const { promptAtoms, promptObservations, sourceObservationIds } =
+      this.buildClusterLevelPromptInputs(cluster, atoms);
+
+    let levels = {};
+    if (allowLlm && this.llmClient) {
+      levels = await generateLevels(promptAtoms, promptObservations, this.llmClient);
+    }
+
+    let normalizedLevels = this.normalizeClusterLevels(levels);
+    if (!normalizedLevels.l0 && !normalizedLevels.l1 && !normalizedLevels.l2) {
+      normalizedLevels = this.normalizeClusterLevels(this.generateClusterLevels(cluster, atoms));
+    }
+
+    if (persist) {
+      if (!cluster?.id) {
+        throw new Error("Cluster id is required to persist LOD levels");
+      }
+
+      await persistLevels(
+        this.database,
+        cluster.id,
+        normalizedLevels,
+        sourceObservationIds,
+        this.embedText?.bind(this),
+      );
+    }
+
+    return {
+      status: "processed",
+      atomsExtracted: atoms.length,
+      levelsGenerated: {
+        l0: normalizedLevels.l0 ? 1 : 0,
+        l1: normalizedLevels.l1 ? 1 : 0,
+        l2: normalizedLevels.l2 ? 1 : 0,
+      },
+    };
+  }
+
+  async processDreamCycleClusters(clusters, options = {}) {
     let atomsExtracted = 0;
     const levelsGenerated = { l0: 0, l1: 0, l2: 0 };
 
     for (const cluster of clusters ?? []) {
-      if ((cluster?.observations?.length ?? 0) < 3) {
-        continue;
-      }
-
-      const atoms = this.extractClusterAtoms(cluster);
-      atomsExtracted += atoms.length;
-
-      const levels = this.generateClusterLevels(cluster, atoms);
-      for (const level of ["l0", "l1", "l2"]) {
-        if (levels[level]?.text) {
-          levelsGenerated[level] += 1;
+      try {
+        const result = await this.processSingleDreamCycleCluster(cluster, options);
+        if (result.status !== "processed") {
+          continue;
         }
+
+        atomsExtracted += result.atomsExtracted;
+        for (const level of ["l0", "l1", "l2"]) {
+          levelsGenerated[level] += result.levelsGenerated[level];
+        }
+      } catch (error) {
+        console.error(
+          `[dream-cycle] Failed to process cluster ${cluster?.id ?? cluster?.cluster_id ?? "unknown"}: ${error.message}`,
+        );
       }
     }
 
     return { atomsExtracted, levelsGenerated };
+  }
+
+  listClustersEligibleForLevelBackfill(minObservations = 3) {
+    return this.database.prepare(`
+      SELECT oc.id
+      FROM observation_clusters oc
+      WHERE NOT EXISTS (
+        SELECT 1
+        FROM cluster_levels cl
+        WHERE cl.cluster_id = oc.id
+      )
+      AND (
+        SELECT COUNT(*)
+        FROM observations o
+        WHERE o.compressed_into = oc.id
+      ) >= ?
+      ORDER BY oc.created_at ASC, oc.id ASC
+    `).all(minObservations).map((row) => row.id);
+  }
+
+  loadPersistedObservationClusters(clusterIds) {
+    if (!Array.isArray(clusterIds) || clusterIds.length === 0) {
+      return [];
+    }
+
+    const placeholders = clusterIds.map(() => "?").join(", ");
+    const rows = this.database.prepare(`
+      SELECT
+        oc.id AS cluster_id,
+        oc.episode_id AS episode_id,
+        oc.topic_label AS topic_label,
+        oc.entities AS entities,
+        oc.topics AS topics,
+        oc.time_span_start AS time_span_start,
+        oc.time_span_end AS time_span_end,
+        oc.observation_count AS observation_count,
+        oc.metadata AS cluster_metadata,
+        o.id AS observation_id,
+        o.category,
+        o.predicate,
+        o.subject_entity_id AS subject_entity_id,
+        o.object_entity_id AS object_entity_id,
+        o.detail,
+        o.confidence,
+        o.source_span AS source_span,
+        o.metadata_json AS metadata_json,
+        o.created_at AS created_at,
+        o.compressed_into AS compressed_into
+      FROM observation_clusters oc
+      JOIN observations o ON o.compressed_into = oc.id
+      WHERE oc.id IN (${placeholders})
+      ORDER BY oc.created_at ASC, oc.id ASC, o.created_at ASC, o.id ASC
+    `).all(...clusterIds);
+
+    const clusters = new Map();
+    for (const row of rows) {
+      if (!clusters.has(row.cluster_id)) {
+        clusters.set(row.cluster_id, {
+          id: row.cluster_id,
+          episode_id: row.episode_id,
+          topic_label: row.topic_label,
+          entities: parseJson(row.entities, []),
+          topics: parseJson(row.topics, []),
+          time_span_start: row.time_span_start,
+          time_span_end: row.time_span_end,
+          observation_count: Number(row.observation_count ?? 0),
+          metadata: parseJson(row.cluster_metadata, null),
+          observations: [],
+        });
+      }
+
+      clusters.get(row.cluster_id).observations.push({
+        id: row.observation_id,
+        category: row.category,
+        predicate: row.predicate,
+        subject_entity_id: row.subject_entity_id,
+        object_entity_id: row.object_entity_id,
+        detail: row.detail,
+        confidence: Number(row.confidence ?? 0.5),
+        source_span: row.source_span,
+        metadata_json: row.metadata_json,
+        created_at: row.created_at,
+        compressed_into: row.compressed_into,
+      });
+    }
+
+    return clusterIds
+      .map((clusterId) => clusters.get(clusterId) ?? null)
+      .filter(Boolean);
+  }
+
+  async backfillClusterLevels({ batchSize = 50, minObservations = 3 } = {}) {
+    const resolvedBatchSize = Math.max(1, Math.trunc(Number(batchSize) || 50));
+    const resolvedMinObservations = Math.max(1, Math.trunc(Number(minObservations) || 3));
+    const eligibleClusterIds = this.listClustersEligibleForLevelBackfill(resolvedMinObservations);
+    const report = {
+      processed: 0,
+      skipped: 0,
+      failed: 0,
+      total_eligible: eligibleClusterIds.length,
+    };
+
+    for (let index = 0; index < eligibleClusterIds.length; index += resolvedBatchSize) {
+      const batchIds = eligibleClusterIds.slice(index, index + resolvedBatchSize);
+      const clusters = this.loadPersistedObservationClusters(batchIds);
+      const clusterById = new Map(clusters.map((cluster) => [cluster.id, cluster]));
+
+      for (const clusterId of batchIds) {
+        const cluster = clusterById.get(clusterId);
+        if (!cluster) {
+          report.failed += 1;
+          console.error(`[dream-cycle] Failed to load cluster ${clusterId} for LOD backfill`);
+          continue;
+        }
+
+        try {
+          const result = await this.processSingleDreamCycleCluster(cluster);
+          if (result.status === "skipped") {
+            report.skipped += 1;
+            continue;
+          }
+
+          report.processed += 1;
+        } catch (error) {
+          report.failed += 1;
+          console.error(`[dream-cycle] Failed to backfill cluster ${clusterId}: ${error.message}`);
+        }
+      }
+    }
+
+    return report;
   }
 
   collectPatternCandidates({ lookbackDays = 14, minOccurrences = 3 } = {}) {
@@ -4404,7 +4640,7 @@ export class ContextOS {
     this._dreamCycleLock = true;
     const startTime = performance.now();
     const timestamp = new Date().toISOString();
-    const clusterPlan = compressObservations
+    const clusterPlan = compressObservations && dryRun
       ? this.buildDreamCycleClusterPlan({ until: timestamp, sessionGapMinutes: 30 })
       : { episodes: [], clusters: [], episodeSummaries: [], observationsClustered: 0 };
 
@@ -4447,7 +4683,7 @@ export class ContextOS {
           episodesDetected = clusteringResult.episodes_detected;
           clustersCreated = clusteringResult.clusters_detected;
 
-          const artifactResult = this.processDreamCycleClusters(clusterPlan.clusters);
+          const artifactResult = await this.processDreamCycleClusters(clusteringResult.clusters);
           atomsExtracted = artifactResult.atomsExtracted;
           levelBreakdown = artifactResult.levelsGenerated;
         }
@@ -4491,7 +4727,10 @@ export class ContextOS {
           episodesDetected = clusterPlan.episodes.length;
           clustersCreated = clusterPlan.clusters.length;
 
-          const artifactResult = this.processDreamCycleClusters(clusterPlan.clusters);
+          const artifactResult = await this.processDreamCycleClusters(clusterPlan.clusters, {
+            persist: false,
+            allowLlm: false,
+          });
           atomsExtracted = artifactResult.atomsExtracted;
           levelBreakdown = artifactResult.levelsGenerated;
         }

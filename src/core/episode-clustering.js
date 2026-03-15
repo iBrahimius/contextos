@@ -264,7 +264,7 @@ export function detectTopicClusters(episodeObservations, options = {}) {
  * @param {string} options.since - ISO timestamp (start of range)
  * @param {string} options.until - ISO timestamp (end of range)
  * @param {number} options.sessionGapMinutes - Episode detection gap threshold (default: 30)
- * @returns {object} { episodes_detected, clusters_detected, observations_clustered }
+ * @returns {object} { episodes_detected, clusters_detected, observations_clustered, clusters }
  */
 export function clusterObservations(db, options = {}) {
   const { since, until, sessionGapMinutes = 30 } = options;
@@ -300,6 +300,7 @@ export function clusterObservations(db, options = {}) {
       episodes_detected: 0,
       clusters_detected: 0,
       observations_clustered: 0,
+      clusters: [],
     };
   }
 
@@ -317,6 +318,7 @@ export function clusterObservations(db, options = {}) {
 
   let totalClusters = 0;
   let totalClustered = 0;
+  const persistedClusters = [];
 
   // 4. Within each episode, detect topic clusters
   for (const episode of episodes) {
@@ -375,6 +377,12 @@ export function clusterObservations(db, options = {}) {
         `).run(clusterId, obs.id);
         totalClustered += 1;
       }
+
+      persistedClusters.push({
+        id: clusterId,
+        episode_id: episodeId,
+        ...cluster,
+      });
     }
   }
 
@@ -382,5 +390,6 @@ export function clusterObservations(db, options = {}) {
     episodes_detected: episodes.length,
     clusters_detected: totalClusters,
     observations_clustered: totalClustered,
+    clusters: persistedClusters,
   };
 }
