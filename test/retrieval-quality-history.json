@@ -1254,59 +1254,59 @@
     ]
   },
   {
-    "timestamp": "2026-03-15T13:52:24.042Z",
+    "timestamp": "2026-03-15T16:11:33.733Z",
     "label": "baseline",
     "queryCount": 22,
-    "avgPrecisionAt5": 0.473,
-    "avgMRR": 0.693,
-    "passRate": 0.727,
-    "artifactLeakRate": 0.045,
+    "avgPrecisionAt5": 0.534,
+    "avgMRR": 0.739,
+    "passRate": 0.818,
+    "artifactLeakRate": 0.091,
     "p50LatencyMs": null,
     "p95LatencyMs": null,
-    "totalDurationMs": 4806,
+    "totalDurationMs": 5721,
     "byIntent": {
       "simple": {
         "count": 8,
-        "avgPrecision": 0.667,
+        "avgPrecision": 0.656,
         "avgMRR": 0.781,
         "passRate": 0.75,
-        "artifactLeakRate": 0
+        "artifactLeakRate": 0.125
       },
       "hybrid": {
         "count": 8,
-        "avgPrecision": 0.396,
+        "avgPrecision": 0.51,
         "avgMRR": 0.688,
         "passRate": 0.875,
         "artifactLeakRate": 0.125
       },
       "deep": {
         "count": 6,
-        "avgPrecision": 0.319,
-        "avgMRR": 0.583,
-        "passRate": 0.5,
+        "avgPrecision": 0.403,
+        "avgMRR": 0.75,
+        "passRate": 0.833,
         "artifactLeakRate": 0
       }
     },
     "byRoute": {
       "current_state": {
         "count": 7,
-        "avgPrecision": 0.69,
+        "avgPrecision": 0.643,
         "avgMRR": 0.893,
         "passRate": 0.857,
         "artifactLeakRate": 0
       },
       "history_temporal": {
         "count": 6,
-        "avgPrecision": 0.222,
+        "avgPrecision": 0.417,
         "avgMRR": 0.5,
         "passRate": 0.667,
         "artifactLeakRate": 0.167
       },
       "why_explanatory": {
         "count": 3,
-        "avgPrecision": 0.389,
-        "avgMRR": 0.75,
-        "passRate": 0.667,
+        "avgPrecision": 0.556,
+        "avgMRR": 0.833,
+        "passRate": 1,
         "artifactLeakRate": 0
       },
       "entity_state": {
@@ -1314,13 +1314,13 @@
         "avgPrecision": 0.778,
         "avgMRR": 0.833,
         "passRate": 1,
-        "artifactLeakRate": 0
+        "artifactLeakRate": 0.333
       },
       "mixed": {
         "count": 3,
         "avgPrecision": 0.25,
-        "avgMRR": 0.417,
-        "passRate": 0.333,
+        "avgMRR": 0.667,
+        "passRate": 0.667,
         "artifactLeakRate": 0
       }
     },
@@ -1389,7 +1389,9 @@
         "mrr": 1,
         "pass": true,
         "typeMatch": false,
-        "artifactViolations": [],
+        "artifactViolations": [
+          "term:audit"
+        ],
         "familyCounts": {
           "canonical": 4,
           "fts": 1
@@ -1399,7 +1401,7 @@
         "id": "simple-06",
         "intent": "simple",
         "route": "current_state",
-        "precisionAt5": 1,
+        "precisionAt5": 0.667,
         "mrr": 1,
         "pass": true,
         "typeMatch": false,
@@ -1461,19 +1463,21 @@
         "typeMatch": false,
         "artifactViolations": [],
         "familyCounts": {
-          "fts": 5
+          "fts": 4,
+          "canonical": 1
         }
       },
       {
         "id": "hybrid-04",
         "intent": "hybrid",
         "route": "history_temporal",
-        "precisionAt5": 0.5,
+        "precisionAt5": 0.75,
         "mrr": 1,
         "pass": true,
-        "typeMatch": true,
+        "typeMatch": false,
         "artifactViolations": [
-          "term:benchmark"
+          "term:benchmark",
+          "term:audit"
         ],
         "familyCounts": {
           "conversational": 5
@@ -1539,15 +1543,15 @@
         "id": "deep-02",
         "intent": "deep",
         "route": "why_explanatory",
-        "precisionAt5": 0.25,
-        "mrr": 0.25,
-        "pass": false,
+        "precisionAt5": 0.5,
+        "mrr": 0.5,
+        "pass": true,
         "typeMatch": false,
         "artifactViolations": [],
         "familyCounts": {
           "fts": 2,
-          "conversational": 2,
-          "canonical": 1
+          "conversational": 1,
+          "canonical": 2
         }
       },
       {
@@ -1571,7 +1575,7 @@
         "precisionAt5": 0,
         "mrr": 0,
         "pass": false,
-        "typeMatch": true,
+        "typeMatch": false,
         "artifactViolations": [],
         "familyCounts": {
           "canonical": 5
@@ -1581,14 +1585,14 @@
         "id": "deep-05",
         "intent": "deep",
         "route": "why_explanatory",
-        "precisionAt5": 0.25,
+        "precisionAt5": 0.5,
         "mrr": 1,
         "pass": true,
         "typeMatch": false,
         "artifactViolations": [],
         "familyCounts": {
           "canonical": 4,
-          "fts": 1
+          "conversational": 1
         }
       },
       {
@@ -1596,20 +1600,19 @@
         "intent": "deep",
         "route": "mixed",
         "precisionAt5": 0.75,
-        "mrr": 0.25,
-        "pass": false,
+        "mrr": 1,
+        "pass": true,
         "typeMatch": false,
         "artifactViolations": [],
         "familyCounts": {
-          "fts": 4,
-          "canonical": 1
+          "fts": 5
         }
       },
       {
         "id": "temporal-01",
         "intent": "hybrid",
         "route": "history_temporal",
-        "precisionAt5": 0,
+        "precisionAt5": 0.667,
         "mrr": 0,
         "pass": true,
         "typeMatch": false,
@@ -1622,10 +1625,10 @@
         "id": "temporal-02",
         "intent": "simple",
         "route": "history_temporal",
-        "precisionAt5": 0,
+        "precisionAt5": 0.25,
         "mrr": 0,
         "pass": false,
-        "typeMatch": true,
+        "typeMatch": false,
         "artifactViolations": [],
         "familyCounts": {
           "conversational": 5

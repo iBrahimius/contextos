@@ -5,6 +5,7 @@ import { analyzeClaimsTruthSet } from "../core/claim-resolution.js";
 import { normalizeEnrichment } from "../core/normalize-enrichment.js";
 import { getValidTransitions, validateTransition } from "../core/claim-types.js";
 import { lintRefTags, lintRefTagsPath } from "../core/ref-linter.js";
+import { detectTemporalPatterns } from "../core/pattern-detection.js";
 
 const CONTENT_TYPES = {
   ".css": "text/css; charset=utf-8",
@@ -907,6 +908,65 @@ export async function handleRequest(contextOS, rootDir, request, response) {
         return;
       }
       sendJson(response, 200, withGraphVersion(detail, resolveGraphVersion(contextOS)));
+      return;
+    }
+
+    // ── Pattern endpoints (v2.4) ─────────────────────────────────────────
+
+    if (request.method === "GET" && pathname === "/api/patterns") {
+      const lookbackDays = Number(url.searchParams.get("lookback_days") ?? 14) || 14;
+      const minOccurrences = Number(url.searchParams.get("min_occurrences") ?? 3) || 3;
+      const patterns = contextOS.collectPatternCandidates({ lookbackDays, minOccurrences });
+      sendJson(response, 200, withGraphVersion({ patterns, count: patterns.length }, resolveGraphVersion(contextOS)));
+      return;
+    }
+
+    if (request.method === "GET" && pathname === "/api/patterns/temporal") {
+      const lookbackDays = Number(url.searchParams.get("lookback_days") ?? 30) || 30;
+      const minOccurrences = Number(url.searchParams.get("min_occurrences") ?? 3) || 3;
+      const patterns = detectTemporalPatterns(contextOS.database, { lookbackDays, minOccurrences });
+      const serialized = patterns.map((p) => ({
+        ...p,
+        nextExpected: p.nextExpected instanceof Date ? p.nextExpected.toISOString() : p.nextExpected,
+      }));
+      sendJson(response, 200, withGraphVersion({ patterns: serialized, count: serialized.length }, resolveGraphVersion(contextOS)));
+      return;
+    }
+
+    if (request.method === "GET" && pathname === "/api/patterns/feedback") {
+      const action = url.searchParams.get("action") ?? null;
+      const limit = Number(url.searchParams.get("limit") ?? 50) || 50;
+      const feedback = contextOS.database.listPatternFeedback({ action: action || null, limit });
+      sendJson(response, 200, withGraphVersion({ feedback, count: feedback.length }, resolveGraphVersion(contextOS)));
+      return;
+    }
+
+    if (
+      request.method === "POST"
+      && pathname.startsWith("/api/patterns/")
+      && pathname.endsWith("/feedback")
+    ) {
+      const rawKey = pathname.replace("/api/patterns/", "").replace("/feedback", "");
+      const patternKey = decodeURIComponent(rawKey);
+      if (!patternKey) {
+        sendJson(response, 400, withGraphVersion({ error: "patternKey is required" }, resolveGraphVersion(contextOS)));
+        return;
+      }
+
+      const body = await parseJsonBody(request);
+      const { action, note } = body ?? {};
+      const validActions = ["confirmed", "rejected", "snoozed"];
+      if (!action || !validActions.includes(action)) {
+        sendJson(response, 400, withGraphVersion({ error: `action must be one of: ${validActions.join(", ")}` }, resolveGraphVersion(contextOS)));
+        return;
+      }
+
+      const result = contextOS.database.insertPatternFeedback({
+        patternKey,
+        action,
+        userNote: note ?? null,
+      });
+      sendJson(response, 200, withGraphVersion({ ok: true, feedbackId: result.id }, resolveGraphVersion(contextOS)));
       return;
     }
 

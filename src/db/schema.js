@@ -406,4 +406,17 @@ CREATE TABLE IF NOT EXISTS session_checkpoints (
   active_decision_ids TEXT,
   active_goal_ids TEXT
 );
+
+-- ── Pattern Feedback (v2.4) ─────────────────────────────────────────
+
+CREATE TABLE IF NOT EXISTS pattern_feedback (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  pattern_key TEXT NOT NULL,
+  action TEXT NOT NULL CHECK (action IN ('confirmed', 'rejected', 'snoozed')),
+  source_claim_ids TEXT,
+  user_note TEXT,
+  created_at TEXT NOT NULL DEFAULT (datetime('now'))
+);
+
+CREATE INDEX IF NOT EXISTS idx_pattern_feedback_key ON pattern_feedback(pattern_key);
 `;

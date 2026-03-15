@@ -4224,6 +4224,116 @@ export class ContextDatabase {
     `).run(text, clusterId, level);
   }
 
+  // ── Pattern Feedback (v2.4) ──────────────────────────────────────────
+
+  /**
+   * Insert a feedback record for a pattern.
+   *
+   * @param {object} options
+   * @param {string} options.patternKey - groupKey: "entityId::claimType::predicate"
+   * @param {string} options.action - 'confirmed' | 'rejected' | 'snoozed'
+   * @param {string[]} [options.sourceClaimIds] - Claim IDs that formed the pattern
+   * @param {string} [options.userNote] - Optional user comment
+   * @returns {{ id: number }} Inserted row id
+   */
+  insertPatternFeedback({ patternKey, action, sourceClaimIds = null, userNote = null }) {
+    const validActions = ["confirmed", "rejected", "snoozed"];
+    if (!validActions.includes(action)) {
+      throw new Error(`Invalid pattern feedback action: ${action}`);
+    }
+
+    const normalizedKey = String(patternKey ?? "").trim();
+    if (!normalizedKey) {
+      throw new Error("patternKey is required");
+    }
+
+    const sourceClaimIdsJson = Array.isArray(sourceClaimIds)
+      ? JSON.stringify(sourceClaimIds)
+      : (sourceClaimIds ? String(sourceClaimIds) : null);
+
+    const result = this.prepare(`
+      INSERT INTO pattern_feedback (pattern_key, action, source_claim_ids, user_note)
+      VALUES (?, ?, ?, ?)
+    `).run(normalizedKey, action, sourceClaimIdsJson, userNote ?? null);
+
+    return { id: result.lastInsertRowid };
+  }
+
+  /**
+   * Get the latest feedback for a pattern key.
+   *
+   * @param {string} patternKey - The pattern group key
+   * @returns {object|null} Latest feedback row or null
+   */
+  getPatternFeedback(patternKey) {
+    if (!patternKey) {
+      return null;
+    }
+
+    const row = this.prepare(`
+      SELECT
+        id,
+        pattern_key AS patternKey,
+        action,
+        source_claim_ids AS sourceClaimIds,
+        user_note AS userNote,
+        created_at AS createdAt
+      FROM pattern_feedback
+      WHERE pattern_key = ?
+      ORDER BY created_at DESC, id DESC
+      LIMIT 1
+    `).get(String(patternKey));
+
+    if (!row) {
+      return null;
+    }
+
+    return {
+      ...row,
+      sourceClaimIds: parseJson(row.sourceClaimIds, null),
+    };
+  }
+
+  /**
+   * List pattern feedback entries, optionally filtered by action.
+   *
+   * @param {object} [options]
+   * @param {string} [options.action] - Filter by action: 'confirmed' | 'rejected' | 'snoozed'
+   * @param {number} [options.limit=50] - Maximum rows to return
+   * @returns {object[]} Array of feedback rows
+   */
+  listPatternFeedback({ action = null, limit = 50 } = {}) {
+    const params = [];
+    const clauses = [];
+
+    if (action) {
+      clauses.push("action = ?");
+      params.push(action);
+    }
+
+    const whereClause = clauses.length ? `WHERE ${clauses.join(" AND ")}` : "";
+    params.push(clampLimit(limit, 50));
+
+    const rows = this.prepare(`
+      SELECT
+        id,
+        pattern_key AS patternKey,
+        action,
+        source_claim_ids AS sourceClaimIds,
+        user_note AS userNote,
+        created_at AS createdAt
+      FROM pattern_feedback
+      ${whereClause}
+      ORDER BY created_at DESC, id DESC
+      LIMIT ?
+    `).all(...params);
+
+    return rows.map((row) => ({
+      ...row,
+      sourceClaimIds: parseJson(row.sourceClaimIds, null),
+    }));
+  }
+
   close() {
     this.closed = true;
     this.sqlite.close();
