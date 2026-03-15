@@ -12,8 +12,13 @@ const DEFAULT_REVIEW_INTERVAL_MS = 2 * 60 * 60 * 1000;
 const DEFAULT_MORNING_HOUR = 8;
 const DEFAULT_END_OF_DAY_HOUR = 22;
 const DEFAULT_END_OF_DAY_MINUTE = 30;
+const DEFAULT_AUTO_APPLY_MIN_CONFIDENCE = 0.85;
+const DEFAULT_AUTO_APPLY_TYPES = ["fact", "relationship"];
+const DEFAULT_AUTO_EXPIRE_DAYS = 30;
 const QUIET_HOURS_START = 23;
 const QUIET_HOURS_END = 8;
+const DAY_IN_MS = 24 * 60 * 60 * 1000;
+const AUTO_APPLY_REASON = "auto_applied: high_confidence_observation";
 
 function defaultNow() {
   return Date.now();
@@ -38,6 +43,50 @@ function toTimestamp(value) {
 
   const parsed = Date.parse(String(value ?? ""));
   return Number.isFinite(parsed) ? parsed : null;
+}
+
+function normalizeMutationType(value) {
+  return String(value ?? "")
+    .trim()
+    .toLowerCase()
+    .replace(/^add_/, "");
+}
+
+function normalizeConfidence(value, fallback = DEFAULT_AUTO_APPLY_MIN_CONFIDENCE) {
+  if (value === null || value === undefined || String(value).trim() === "") {
+    return fallback;
+  }
+
+  const numeric = Number(value);
+  if (!Number.isFinite(numeric)) {
+    return fallback;
+  }
+
+  return Math.min(1, Math.max(0, numeric));
+}
+
+function normalizeNonNegativeInteger(value, fallback = DEFAULT_AUTO_EXPIRE_DAYS) {
+  if (value === null || value === undefined || String(value).trim() === "") {
+    return fallback;
+  }
+
+  const numeric = Number(value);
+  if (!Number.isFinite(numeric)) {
+    return fallback;
+  }
+
+  return Math.max(0, Math.trunc(numeric));
+}
+
+function normalizeTypeList(value, fallback = DEFAULT_AUTO_APPLY_TYPES) {
+  if (value === null || value === undefined) {
+    return [...fallback];
+  }
+
+  const values = Array.isArray(value) ? value : String(value).split(",");
+  return Array.from(new Set(values
+    .map((entry) => normalizeMutationType(entry))
+    .filter(Boolean)));
 }
 
 function nextLocalTime(nowMs, hour, minute = 0) {
@@ -71,6 +120,9 @@ export class ReviewManager {
    * @param {number} [options.endOfDayMinute]
    * @param {(input: object) => Promise<object>|object} [options.processReview]
    * @param {string} [options.actorId]
+   * @param {number} [options.autoApplyMinConfidence]
+   * @param {string[]|string} [options.autoApplyTypes]
+   * @param {number} [options.autoExpireDays]
    */
   constructor({
     contextOS,
@@ -87,6 +139,9 @@ export class ReviewManager {
     endOfDayMinute = DEFAULT_END_OF_DAY_MINUTE,
     processReview = null,
     actorId = "review-manager",
+    autoApplyMinConfidence = DEFAULT_AUTO_APPLY_MIN_CONFIDENCE,
+    autoApplyTypes = DEFAULT_AUTO_APPLY_TYPES,
+    autoExpireDays = DEFAULT_AUTO_EXPIRE_DAYS,
   }) {
     this.contextOS = contextOS;
     this.database = database;
@@ -102,6 +157,9 @@ export class ReviewManager {
     this.endOfDayMinute = endOfDayMinute;
     this.processReview = processReview;
     this.actorId = actorId;
+    this.autoApplyMinConfidence = normalizeConfidence(autoApplyMinConfidence, DEFAULT_AUTO_APPLY_MIN_CONFIDENCE);
+    this.autoApplyTypes = normalizeTypeList(autoApplyTypes, DEFAULT_AUTO_APPLY_TYPES);
+    this.autoExpireDays = normalizeNonNegativeInteger(autoExpireDays, DEFAULT_AUTO_EXPIRE_DAYS);
     this.started = false;
     this._activeReviewPromise = null;
     this._pendingAutomaticTriggerPromise = null;
@@ -361,32 +419,115 @@ export class ReviewManager {
       return this.processReview(input);
     }
 
-    const reviewQuery = this.contextOS.reviewMutations({
+    const listLimit = Math.max(1, Number(input.queueStats?.total ?? 0));
+    const actionableMutations = this.contextOS.reviewMutations({
+      action: "list",
+      actorId: this.actorId,
+      filters: {
+        limit: listLimit,
+      },
+    });
+    const parkedMutations = this.contextOS.reviewMutations({
       action: "list",
       actorId: this.actorId,
       filters: {
         includeParked: true,
-        limit: Math.max(1, input.queueStats.total),
+        triage: "parked_backlog",
+        limit: listLimit,
       },
     });
+    const reviewStartedAtMs = toTimestamp(input.reviewStartedAt) ?? this.now();
+    const autoApplyMutationIds = actionableMutations.mutations
+      .filter((mutation) => this._shouldAutoApplyMutation(mutation))
+      .map((mutation) => mutation.mutation_id);
+    const expiredParkedMutationIds = parkedMutations.mutations
+      .filter((mutation) => this._isExpiredParkedMutation(mutation, reviewStartedAtMs))
+      .map((mutation) => mutation.mutation_id);
+    const autoApplied = autoApplyMutationIds.length
+      ? this.contextOS.reviewMutations({
+        action: "apply_batch",
+        mutationIds: autoApplyMutationIds,
+        reason: AUTO_APPLY_REASON,
+        actorId: this.actorId,
+      })
+      : this._emptyBatchReview("apply_batch", "accepted", AUTO_APPLY_REASON);
+    const autoExpireReason = this._getAutoExpireReason();
+    const autoExpired = expiredParkedMutationIds.length
+      ? this.contextOS.reviewMutations({
+        action: "reject_batch",
+        mutationIds: expiredParkedMutationIds,
+        reason: autoExpireReason,
+        actorId: this.actorId,
+      })
+      : this._emptyBatchReview("reject_batch", "rejected", autoExpireReason);
+    const remainingTotal = Math.max(0, actionableMutations.total + parkedMutations.total - autoApplied.count - autoExpired.count);
+    const autoApplyLabel = this.autoApplyTypes.length ? this.autoApplyTypes.join("/") : "configured";
+
+    this._logInfo(`[review-manager] auto-applied ${autoApplied.count} ${autoApplyLabel} mutations, auto-expired ${autoExpired.count} parked mutations`);
 
     return {
-      action: "pass_through",
-      note: "Deterministic review summary only; queued mutations remain unchanged.",
-      reviewed_total: reviewQuery.total,
-      mutation_ids: reviewQuery.mutations.map((mutation) => mutation.mutation_id),
-      mutations: reviewQuery.mutations.map((mutation) => ({
-        mutation_id: mutation.mutation_id,
-        type: mutation.type,
-        status: mutation.status,
-        write_class: mutation.write_class,
-        queue_bucket: mutation.queue_bucket,
-        triage: mutation.triage,
-        confidence: mutation.confidence,
-        detail: mutation.detail,
-        created_at: mutation.created_at,
-      })),
-      summary: reviewQuery.summary,
+      action: "auto_review_policy",
+      reviewed_total: actionableMutations.total + parkedMutations.total,
+      actionable_total: actionableMutations.total,
+      parked_total: parkedMutations.total,
+      remaining_total: remainingTotal,
+      auto_apply_min_confidence: this.autoApplyMinConfidence,
+      auto_apply_types: [...this.autoApplyTypes],
+      auto_expire_days: this.autoExpireDays,
+      auto_applied: {
+        count: autoApplied.count,
+        reason: AUTO_APPLY_REASON,
+        mutation_ids: autoApplyMutationIds,
+        mutations: autoApplied.mutations,
+        results: autoApplied.results,
+      },
+      auto_expired: {
+        count: autoExpired.count,
+        reason: autoExpireReason,
+        mutation_ids: expiredParkedMutationIds,
+        mutations: autoExpired.mutations,
+        results: autoExpired.results,
+      },
+      summary: {
+        auto_applied: autoApplied.count,
+        auto_expired: autoExpired.count,
+        remaining: remainingTotal,
+      },
+    };
+  }
+
+  _shouldAutoApplyMutation(mutation) {
+    const confidence = Number(mutation?.confidence ?? 0);
+    if (mutation?.triage !== "ai_review" || confidence < this.autoApplyMinConfidence) {
+      return false;
+    }
+
+    return this.autoApplyTypes.includes(normalizeMutationType(mutation.type));
+  }
+
+  _isExpiredParkedMutation(mutation, reviewStartedAtMs) {
+    const createdAtMs = toTimestamp(mutation?.created_at);
+    if (createdAtMs === null) {
+      return false;
+    }
+
+    return createdAtMs < (reviewStartedAtMs - (this.autoExpireDays * DAY_IN_MS));
+  }
+
+  _getAutoExpireReason() {
+    return `auto_expired: parked_over_${this.autoExpireDays}_days`;
+  }
+
+  _emptyBatchReview(action, status, reason) {
+    return {
+      ok: true,
+      action,
+      status,
+      reason,
+      mutation_ids: [],
+      count: 0,
+      mutations: [],
+      results: [],
     };
   }
 

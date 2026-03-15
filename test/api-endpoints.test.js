@@ -1117,8 +1117,11 @@ test("GET /api/review/status and POST /api/review/trigger expose automated revie
     const triggerPayload = await triggerResponse.json();
     assert.equal(triggerPayload.status, "completed");
     assert.equal(triggerPayload.trigger.reason, "api_manual_review");
-    assert.equal(triggerPayload.review.action, "pass_through");
+    assert.equal(triggerPayload.review.action, "auto_review_policy");
     assert.equal(triggerPayload.review.reviewed_total >= 1, true);
+    assert.equal(triggerPayload.review.auto_applied.count, 0);
+    assert.equal(triggerPayload.review.auto_expired.count, 0);
+    assert.equal(triggerPayload.review.remaining_total >= 1, true);
     assert.ok(triggerPayload.review_state.last_review_at);
     assert.equal(triggerPayload.review_state.review_in_progress, false);
     assert.equal(triggerPayload.review_state.mutations_since_last_review, 0);

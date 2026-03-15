@@ -5,6 +5,7 @@ import os from "node:os";
 import path from "node:path";
 
 import { ContextOS } from "../src/core/context-os.js";
+import { classifyWriteClass } from "../src/core/write-discipline.js";
 import { ContextDatabase } from "../src/db/database.js";
 
 function createSilentLogger() {
@@ -81,27 +82,104 @@ async function makeRoot() {
   return root;
 }
 
-function seedQueuedProposal(contextOS, detail = "Queued mutation for review") {
-  return contextOS.database.insertGraphProposal({
+function buildProposalPayload({ proposalType, detail, subjectLabel = "ContextOS", predicate = null, objectLabel = null }) {
+  const normalizedType = String(proposalType ?? "").replace(/^add_/, "");
+
+  if (normalizedType === "relationship") {
+    return {
+      type: "relationship",
+      subjectLabel,
+      predicate: predicate ?? "related_to",
+      objectLabel: objectLabel ?? "SQLite",
+      detail,
+    };
+  }
+
+  if (normalizedType === "fact") {
+    return {
+      type: "fact",
+      entity: subjectLabel,
+      detail,
+    };
+  }
+
+  if (normalizedType === "decision") {
+    return {
+      type: proposalType,
+      entity: subjectLabel,
+      choice: detail,
+    };
+  }
+
+  if (normalizedType === "constraint") {
+    return {
+      type: proposalType,
+      entity: subjectLabel,
+      content: detail,
+    };
+  }
+
+  return {
+    type: proposalType,
+    entity: subjectLabel,
+    title: detail,
+  };
+}
+
+function seedReviewProposal(contextOS, {
+  proposalType = "add_task",
+  detail = "Queued mutation for review",
+  confidence = 0.8,
+  status = "proposed",
+  subjectLabel = "ContextOS",
+  predicate = null,
+  objectLabel = null,
+  payload = null,
+  writeClass = classifyWriteClass(proposalType),
+  createdAt = null,
+} = {}) {
+  const stored = contextOS.database.insertGraphProposal({
     conversationId: null,
     messageId: null,
     actorId: "seed",
-    proposalType: "add_task",
+    proposalType,
+    subjectLabel,
+    predicate,
+    objectLabel,
     detail,
-    confidence: 0.8,
-    status: "proposed",
-    payload: {
-      title: detail,
-      type: "add_task",
-    },
-    writeClass: "ai_proposed",
+    confidence,
+    status,
+    payload: payload ?? buildProposalPayload({
+      proposalType,
+      detail,
+      subjectLabel,
+      predicate,
+      objectLabel,
+    }),
+    writeClass,
   });
+
+  if (createdAt) {
+    const timestamp = createdAt instanceof Date ? createdAt.toISOString() : String(createdAt);
+    contextOS.database.prepare(`
+      UPDATE graph_proposals
+      SET created_at = ?
+      WHERE id = ?
+    `).run(timestamp, stored.id);
+  }
+
+  return stored;
+}
+
+function seedQueuedProposal(contextOS, detail = "Queued mutation for review") {
+  return seedReviewProposal(contextOS, { detail });
 }
 
 async function createHarness({
   initialDate,
   deferInit = false,
   processReview = null,
+  reviewManagerOptions = {},
 } = {}) {
   const rootDir = await makeRoot();
   const scheduler = createManualScheduler(initialDate ?? new Date(2026, 0, 5, 12, 0, 0, 0));
@@ -115,6 +193,7 @@ async function createHarness({
       clearTimeout: scheduler.clearTimeout,
       processReview,
       logger: createSilentLogger(),
+      ...reviewManagerOptions,
     },
   });
   if (!deferInit) {
@@ -360,6 +439,180 @@ test("ReviewManager runs overdue time-based reviews and the scheduled end-of-day
     } finally {
       await eveningHarness.close();
     }
+  } finally {
+    await harness.close();
+  }
+});
+
+test("ReviewManager auto-applies high-confidence fact and relationship mutations during sweeps", async () => {
+  const harness = await createHarness({
+    initialDate: new Date(2026, 0, 5, 14, 0, 0, 0),
+  });
+
+  try {
+    const fact = seedReviewProposal(harness.contextOS, {
+      proposalType: "fact",
+      detail: "ContextOS keeps SQLite local.",
+      confidence: 0.92,
+      subjectLabel: "ContextOS",
+    });
+    const relationship = seedReviewProposal(harness.contextOS, {
+      proposalType: "relationship",
+      detail: "ContextOS depends on SQLite.",
+      confidence: 0.9,
+      subjectLabel: "ContextOS",
+      predicate: "depends_on",
+      objectLabel: "SQLite",
+    });
+
+    const result = await harness.contextOS.reviewManager.trigger({
+      source: "manual",
+      reason: "test_auto_apply",
+    });
+    const appliedById = new Map(result.review.auto_applied.results.map((entry) => [entry.mutation_id, entry]));
+
+    assert.equal(result.status, "completed");
+    assert.equal(result.review.action, "auto_review_policy");
+    assert.equal(result.review.auto_applied.count, 2);
+    assert.equal(result.review.auto_expired.count, 0);
+    assert.equal(harness.contextOS.database.getGraphProposal(fact.id).status, "accepted");
+    assert.equal(harness.contextOS.database.getGraphProposal(relationship.id).status, "accepted");
+    assert.ok(appliedById.get(fact.id)?.applied?.fact_id);
+    assert.ok(appliedById.get(relationship.id)?.applied?.relationship_id);
+  } finally {
+    await harness.close();
+  }
+});
+
+test("ReviewManager auto-expires parked mutations older than 30 days", async () => {
+  const initialDate = new Date(2026, 1, 5, 12, 0, 0, 0);
+  const harness = await createHarness({ initialDate });
+
+  try {
+    const oldParked = seedReviewProposal(harness.contextOS, {
+      proposalType: "fact",
+      detail: "Old parked fact",
+      confidence: 0.4,
+      createdAt: new Date(initialDate.getTime() - (31 * 24 * 60 * 60 * 1000)),
+    });
+    const recentParked = seedReviewProposal(harness.contextOS, {
+      proposalType: "fact",
+      detail: "Recent parked fact",
+      confidence: 0.45,
+      createdAt: new Date(initialDate.getTime() - (10 * 24 * 60 * 60 * 1000)),
+    });
+
+    const result = await harness.contextOS.reviewManager.trigger({
+      source: "manual",
+      reason: "test_auto_expire",
+    });
+
+    assert.equal(result.review.auto_applied.count, 0);
+    assert.equal(result.review.auto_expired.count, 1);
+    assert.equal(harness.contextOS.database.getGraphProposal(oldParked.id).status, "rejected");
+    assert.equal(harness.contextOS.database.getGraphProposal(oldParked.id).reason, "auto_expired: parked_over_30_days");
+    assert.equal(harness.contextOS.database.getGraphProposal(recentParked.id).status, "proposed");
+  } finally {
+    await harness.close();
+  }
+});
+
+test("ReviewManager leaves tier 2 and tier 3 mutations queued during sweeps", async () => {
+  const harness = await createHarness({
+    initialDate: new Date(2026, 0, 5, 15, 0, 0, 0),
+  });
+
+  try {
+    const task = seedReviewProposal(harness.contextOS, {
+      proposalType: "add_task",
+      detail: "Ship review queue policy",
+      confidence: 0.97,
+    });
+    const decision = seedReviewProposal(harness.contextOS, {
+      proposalType: "add_decision",
+      detail: "Keep human approval for canonical writes",
+      confidence: 0.99,
+    });
+    const constraint = seedReviewProposal(harness.contextOS, {
+      proposalType: "add_constraint",
+      detail: "Do not auto-apply constraint mutations",
+      confidence: 0.99,
+    });
+
+    const result = await harness.contextOS.reviewManager.trigger({
+      source: "manual",
+      reason: "test_leave_queued",
+    });
+
+    assert.equal(result.review.auto_applied.count, 0);
+    assert.equal(result.review.auto_expired.count, 0);
+    assert.equal(harness.contextOS.database.getGraphProposal(task.id).status, "proposed");
+    assert.equal(harness.contextOS.database.getGraphProposal(decision.id).status, "proposed");
+    assert.equal(harness.contextOS.database.getGraphProposal(constraint.id).status, "proposed");
+  } finally {
+    await harness.close();
+  }
+});
+
+test("ReviewManager configurable thresholds tune auto-apply types and auto-expiry", async () => {
+  const initialDate = new Date(2026, 1, 5, 16, 0, 0, 0);
+  const harness = await createHarness({
+    initialDate,
+    reviewManagerOptions: {
+      autoApplyMinConfidence: 0.9,
+      autoApplyTypes: ["fact"],
+      autoExpireDays: 10,
+    },
+  });
+
+  try {
+    const belowThresholdFact = seedReviewProposal(harness.contextOS, {
+      proposalType: "fact",
+      detail: "Below threshold fact",
+      confidence: 0.89,
+    });
+    const allowedFact = seedReviewProposal(harness.contextOS, {
+      proposalType: "fact",
+      detail: "High confidence fact",
+      confidence: 0.93,
+    });
+    const excludedRelationship = seedReviewProposal(harness.contextOS, {
+      proposalType: "relationship",
+      detail: "Relationship excluded by config",
+      confidence: 0.97,
+      subjectLabel: "ContextOS",
+      predicate: "depends_on",
+      objectLabel: "SQLite",
+    });
+    const oldParked = seedReviewProposal(harness.contextOS, {
+      proposalType: "fact",
+      detail: "Old parked fact under custom threshold",
+      confidence: 0.4,
+      createdAt: new Date(initialDate.getTime() - (11 * 24 * 60 * 60 * 1000)),
+    });
+    const recentParked = seedReviewProposal(harness.contextOS, {
+      proposalType: "fact",
+      detail: "Recent parked fact under custom threshold",
+      confidence: 0.4,
+      createdAt: new Date(initialDate.getTime() - (9 * 24 * 60 * 60 * 1000)),
+    });
+
+    const result = await harness.contextOS.reviewManager.trigger({
+      source: "manual",
+      reason: "test_configurable_thresholds",
+    });
+
+    assert.equal(result.review.auto_apply_min_confidence, 0.9);
+    assert.deepEqual(result.review.auto_apply_types, ["fact"]);
+    assert.equal(result.review.auto_expire_days, 10);
+    assert.equal(result.review.auto_applied.count, 1);
+    assert.equal(result.review.auto_expired.count, 1);
+    assert.equal(harness.contextOS.database.getGraphProposal(belowThresholdFact.id).status, "proposed");
+    assert.equal(harness.contextOS.database.getGraphProposal(allowedFact.id).status, "accepted");
+    assert.equal(harness.contextOS.database.getGraphProposal(excludedRelationship.id).status, "proposed");
+    assert.equal(harness.contextOS.database.getGraphProposal(oldParked.id).status, "rejected");
+    assert.equal(harness.contextOS.database.getGraphProposal(oldParked.id).reason, "auto_expired: parked_over_10_days");
+    assert.equal(harness.contextOS.database.getGraphProposal(recentParked.id).status, "proposed");
   } finally {
     await harness.close();
   }
