@@ -1426,7 +1426,7 @@ export class ContextOS {
           embedding,
         };
       });
-    } catch (_err) {
+    } catch {
       // Cluster levels might not exist yet (graceful degradation)
     }
     
