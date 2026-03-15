@@ -197,8 +197,115 @@ export function computeSimilarity(text1, text2) {
   return jaccardSimilarity(tokens1, tokens2);
 }
 
+/**
+ * Detect temporal regularity patterns in claim data.
+ *
+ * For each (entity, type, predicate) group with ≥3 occurrences, checks whether
+ * the timestamps show regularity: stdDev of intervals < 0.5 * mean interval.
+ *
+ * @param {Object} db - Database instance with listRecentClaims() method
+ * @param {Object} options - Detection options
+ *   - lookbackDays: number (default 30)
+ *   - minOccurrences: number (default 3)
+ *   - regularityThreshold: number (default 0.5) - max stdDev/mean to qualify
+ * @returns {Array} Array of temporal pattern objects
+ */
+export function detectTemporalPatterns(db, options = {}) {
+  const lookbackDays = options.lookbackDays ?? 30;
+  const minOccurrences = options.minOccurrences ?? 3;
+  const regularityThreshold = options.regularityThreshold ?? 0.5;
+
+  const lookbackDate = new Date(Date.now() - lookbackDays * 24 * 60 * 60 * 1000).toISOString();
+
+  const recentClaims = db.listRecentClaims({
+    lifecycleStates: ["active", "candidate"],
+    limit: 500,
+  }).filter((claim) => {
+    const claimDate = claim.created_at ?? claim.updated_at ?? "";
+    return claimDate >= lookbackDate;
+  });
+
+  // Group by (subject_entity_id, claim_type, predicate)
+  const groups = new Map();
+  for (const claim of recentClaims) {
+    const key = `${claim.subject_entity_id ?? "__none__"}::${claim.claim_type}::${claim.predicate ?? "__none__"}`;
+    if (!groups.has(key)) {
+      groups.set(key, []);
+    }
+    groups.get(key).push(claim);
+  }
+
+  const temporalPatterns = [];
+
+  for (const [groupKey, groupClaims] of groups) {
+    if (groupClaims.length < minOccurrences) {
+      continue;
+    }
+
+    // Sort claims by timestamp ascending
+    const sorted = groupClaims
+      .map((claim) => ({
+        claim,
+        ts: new Date(claim.created_at ?? claim.updated_at ?? 0).getTime(),
+      }))
+      .filter((item) => !Number.isNaN(item.ts) && item.ts > 0)
+      .sort((a, b) => a.ts - b.ts);
+
+    if (sorted.length < minOccurrences) {
+      continue;
+    }
+
+    // Compute intervals in hours between consecutive timestamps
+    const intervals = [];
+    for (let i = 1; i < sorted.length; i += 1) {
+      const intervalMs = sorted[i].ts - sorted[i - 1].ts;
+      intervals.push(intervalMs / (1000 * 60 * 60)); // convert to hours
+    }
+
+    if (intervals.length < 2) {
+      continue;
+    }
+
+    // Compute mean and standard deviation of intervals
+    const meanInterval = intervals.reduce((sum, v) => sum + v, 0) / intervals.length;
+
+    if (meanInterval <= 0) {
+      continue;
+    }
+
+    const variance = intervals.reduce((sum, v) => sum + Math.pow(v - meanInterval, 2), 0) / intervals.length;
+    const stdDev = Math.sqrt(variance);
+    const regularity = stdDev / meanInterval;
+
+    if (regularity >= regularityThreshold) {
+      continue;
+    }
+
+    // Estimate next expected occurrence
+    const lastTs = sorted[sorted.length - 1].ts;
+    const nextExpected = new Date(lastTs + meanInterval * 60 * 60 * 1000);
+
+    const firstClaim = sorted[0].claim;
+
+    temporalPatterns.push({
+      patternKey: groupKey,
+      entityId: firstClaim.subject_entity_id ?? null,
+      claimType: firstClaim.claim_type,
+      predicate: firstClaim.predicate ?? null,
+      occurrences: sorted.length,
+      meanIntervalHours: meanInterval,
+      stdDevHours: stdDev,
+      regularity,
+      nextExpected,
+    });
+  }
+
+  return temporalPatterns;
+}
+
 export default {
   detectPatterns,
   buildPromotion,
   computeSimilarity,
+  detectTemporalPatterns,
 };

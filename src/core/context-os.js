@@ -13,7 +13,7 @@ import { InjectionGuard } from "./injection-guard.js";
 import { classifyIntent, INTENT_STRATEGIES } from "./intent-router.js";
 import { createLLMClient } from "./llm-client.js";
 import { generateLevels, persistLevels } from "./lod-compression.js";
-import { detectPatterns } from "./pattern-detection.js";
+import { detectPatterns, detectTemporalPatterns } from "./pattern-detection.js";
 import { CLAIM_TYPE_VALUES, LIFECYCLE_STATES } from "./claim-types.js";
 import { normalizeLabel, validateKnowledgePatch } from "./knowledge-patch.js";
 import { PreconsciousBuffer } from "./preconscious.js";
@@ -1426,7 +1426,7 @@ export class ContextOS {
           embedding,
         };
       });
-    } catch (_err) {
+    } catch {
       // Cluster levels might not exist yet (graceful degradation)
     }
     
@@ -4526,7 +4526,10 @@ export class ContextOS {
       const entityLabel = this.claimEntityLabel(bestClaim) ?? claimEntityId(bestClaim);
       const occurrences = groupClaims.length;
 
+      const groupKeyForEntry = `${groupClaims[0].subject_entity_id ?? "__none__"}::${claimType}::${groupClaims[0].predicate ?? "__none__"}`;
+
       candidates.push({
+        groupKey: groupKeyForEntry,
         targetType,
         sourceType: claimType,
         entities: entityLabel ? [entityLabel] : [],
@@ -4550,6 +4553,9 @@ export class ContextOS {
    *
    * Groups claims by (subject_entity_id, claim_type, predicate), checks for
    * >= minOccurrences with high similarity, then proposes canonical mutations.
+   * Checks pattern_feedback to skip rejected patterns, boost confirmed ones,
+   * and push new (unfeedback'd) patterns to the preconscious buffer.
+   * Also runs temporal regularity detection and surfaces those patterns.
    *
    * @param {object} options
    * @param {number} [options.lookbackDays=14] - Days to look back for patterns
@@ -4562,6 +4568,34 @@ export class ContextOS {
     const patterns = [];
 
     for (const candidate of candidates) {
+      const groupKey = candidate.groupKey;
+
+      // Check feedback table for this pattern
+      const feedback = groupKey ? this.database.getPatternFeedback(groupKey) : null;
+
+      // Skip rejected patterns — don't re-propose
+      if (feedback?.action === "rejected") {
+        continue;
+      }
+
+      // Boost confidence for confirmed patterns
+      const effectiveConfidence = feedback?.action === "confirmed"
+        ? 0.95
+        : candidate.confidence;
+
+      // Push new (unfeedback'd) patterns to the preconscious buffer
+      if (!feedback && groupKey) {
+        this.preconsciousBuffer.push({
+          type: "pattern_detected",
+          salience: "medium",
+          detail: `Detected pattern: ${candidate.detail}`,
+          entityLabel: candidate.entityLabel,
+          patternKey: groupKey,
+          occurrences: candidate.occurrences,
+          confidence: candidate.confidence,
+        });
+      }
+
       const proposalResult = this.proposeMutation({
         type: `add_${candidate.targetType}`,
         payload: {
@@ -4573,7 +4607,7 @@ export class ContextOS {
             occurrences: candidate.occurrences,
           },
         },
-        confidence: candidate.confidence,
+        confidence: effectiveConfidence,
         actorId: "system",
       });
 
@@ -4582,9 +4616,30 @@ export class ContextOS {
         patterns.push({
           type: candidate.targetType,
           entities: candidate.entities,
-          confidence: candidate.confidence,
+          confidence: effectiveConfidence,
         });
       }
+    }
+
+    // Temporal regularity detection
+    try {
+      const temporalPatterns = detectTemporalPatterns(this.database, { lookbackDays, minOccurrences });
+      for (const tp of temporalPatterns) {
+        this.preconsciousBuffer.push({
+          type: "temporal_pattern_detected",
+          salience: "medium",
+          detail: `Temporal pattern detected: ${tp.predicate ?? tp.patternKey} every ~${Math.round(tp.meanIntervalHours)}h`,
+          patternKey: tp.patternKey,
+          entityId: tp.entityId,
+          occurrences: tp.occurrences,
+          meanIntervalHours: tp.meanIntervalHours,
+          stdDevHours: tp.stdDevHours,
+          regularity: tp.regularity,
+          nextExpected: tp.nextExpected?.toISOString() ?? null,
+        });
+      }
+    } catch {
+      // Temporal detection is best-effort — never let it break the dream cycle
     }
 
     return {
@@ -4592,6 +4647,29 @@ export class ContextOS {
       promotionsProposed,
       patterns,
     };
+  }
+
+  /**
+   * Return confirmed pattern boosts for use in retrieval scoring.
+   *
+   * Queries pattern_feedback for confirmed entries and returns boost factors
+   * keyed by (entityId, predicate). Actual retrieval integration is a separate concern.
+   *
+   * @returns {{ entityId: string|null, predicate: string|null, boostFactor: number }[]}
+   */
+  getConfirmedPatternBoosts() {
+    const confirmed = this.database.listPatternFeedback({ action: "confirmed" });
+    return confirmed.map((fb) => {
+      // patternKey format: "entityId::claimType::predicate"
+      const parts = String(fb.patternKey ?? "").split("::");
+      const entityId = parts[0] === "__none__" ? null : (parts[0] ?? null);
+      const predicate = parts[2] === "__none__" ? null : (parts[2] ?? null);
+      return {
+        entityId,
+        predicate,
+        boostFactor: 1.5,
+      };
+    });
   }
 
   // ── v2.3: Dream Cycle Orchestrator ───────────────────────────────────

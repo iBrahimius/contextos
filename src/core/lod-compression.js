@@ -102,6 +102,7 @@ export async function generateLevels(atoms, observations, llmClient) {
       prompt,
       model: "anthropic/claude-haiku-4-5",
       maxTokens: 4096,
+      timeoutMs: 300_000, // 5 min — gateway proxy + large prompts
     });
 
     const levels = result.data ?? {};

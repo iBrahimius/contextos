@@ -90,6 +90,7 @@ export async function extractAtoms(observations, llmClient) {
       prompt,
       model: "anthropic/claude-haiku-4-5",
       maxTokens: 2048,
+      timeoutMs: 300_000,
     });
 
     const atoms = result.data?.atoms ?? [];
