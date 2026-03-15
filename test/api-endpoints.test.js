@@ -41,6 +41,7 @@ function seedReviewProposal(contextOS, {
   messageId,
   proposalType,
   detail,
+  payload = null,
   confidence,
   status = "proposed",
   writeClass = "ai_proposed",
@@ -56,7 +57,7 @@ function seedReviewProposal(contextOS, {
     detail,
     confidence,
     status,
-    payload: { title: detail, type: proposalType },
+    payload: payload ?? { title: detail, type: proposalType },
     writeClass,
   });
 
@@ -747,6 +748,108 @@ test("POST /api/mutations/review lists, applies, and rejects proposals", async (
   }
 });
 
+
+test("POST /api/mutations/review applies add_decision proposals that only provide payload.choice", async () => {
+  const harness = await createHarness();
+
+  try {
+    const proposal = seedReviewProposal(harness.contextOS, {
+      messageId: harness.seeded.mutationSourceMessage.id,
+      proposalType: "add_decision",
+      detail: null,
+      payload: {
+        type: "add_decision",
+        entity: "DNS",
+        choice: "Move DNS to Cloudflare",
+        rationale: "Cloudflare simplifies cutover and monitoring.",
+      },
+      confidence: 0.93,
+      status: "proposed",
+      writeClass: "canonical",
+    });
+
+    assert.equal(proposal.detail, null);
+
+    const applyResponse = await fetch(`${harness.baseUrl}/api/mutations/review`, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({
+        action: "apply",
+        mutation_id: proposal.id,
+      }),
+    });
+    assert.equal(applyResponse.status, 200);
+    const applied = await applyResponse.json();
+    assert.equal(applied.status, "accepted");
+
+    const acceptedProposal = harness.contextOS.database.getGraphProposal(proposal.id);
+    assert.equal(acceptedProposal.status, "accepted");
+
+    const createdDecision = harness.contextOS.database.prepare(`
+      SELECT d.title, d.rationale, o.detail AS observation_detail
+      FROM decisions d
+      JOIN observations o ON o.id = d.observation_id
+      WHERE d.id = ?
+      LIMIT 1
+    `).get(applied.applied.decision_id);
+    assert.equal(createdDecision.title, "Move DNS to Cloudflare");
+    assert.equal(createdDecision.rationale, "Cloudflare simplifies cutover and monitoring.");
+    assert.equal(createdDecision.observation_detail, "Move DNS to Cloudflare");
+  } finally {
+    await harness.close();
+  }
+});
+
+test("POST /api/mutations/review applies add_constraint proposals that only provide payload.content", async () => {
+  const harness = await createHarness();
+
+  try {
+    const proposal = seedReviewProposal(harness.contextOS, {
+      messageId: harness.seeded.mutationSourceMessage.id,
+      proposalType: "add_constraint",
+      detail: null,
+      payload: {
+        type: "add_constraint",
+        entity: "DNS",
+        content: "Keep TTL above 60 seconds during migration.",
+        severity: "medium",
+      },
+      confidence: 0.89,
+      status: "proposed",
+      writeClass: "canonical",
+    });
+
+    assert.equal(proposal.detail, null);
+
+    const applyResponse = await fetch(`${harness.baseUrl}/api/mutations/review`, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({
+        action: "apply",
+        mutation_id: proposal.id,
+      }),
+    });
+    assert.equal(applyResponse.status, 200);
+    const applied = await applyResponse.json();
+    assert.equal(applied.status, "accepted");
+
+    const acceptedProposal = harness.contextOS.database.getGraphProposal(proposal.id);
+    assert.equal(acceptedProposal.status, "accepted");
+
+    const createdConstraint = harness.contextOS.database.prepare(`
+      SELECT c.detail, c.severity, o.detail AS observation_detail
+      FROM constraints c
+      JOIN observations o ON o.id = c.observation_id
+      WHERE c.id = ?
+      LIMIT 1
+    `).get(applied.applied.constraint_id);
+    assert.equal(createdConstraint.detail, "Keep TTL above 60 seconds during migration");
+    assert.equal(createdConstraint.severity, "medium");
+    assert.equal(createdConstraint.observation_detail, "Keep TTL above 60 seconds during migration");
+  } finally {
+    await harness.close();
+  }
+});
 
 test("POST /api/mutations/review supports explicit-id batch apply and reject with audit fields", async () => {
   const harness = await createHarness();
