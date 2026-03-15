@@ -26,7 +26,13 @@ function cleanupLock() {
 process.on("exit", cleanupLock);
 // --- end lockfile ---
 
-const contextOS = new ContextOS({ rootDir, deferInit: true });
+const reviewManagerOptions = {
+  autoApplyMinConfidence: process.env.CONTEXTOS_REVIEW_AUTO_APPLY_MIN_CONFIDENCE,
+  autoApplyTypes: process.env.CONTEXTOS_REVIEW_AUTO_APPLY_TYPES,
+  autoExpireDays: process.env.CONTEXTOS_REVIEW_AUTO_EXPIRE_DAYS,
+};
+
+const contextOS = new ContextOS({ rootDir, deferInit: true, reviewManagerOptions });
 let shuttingDown = false;
 
 const server = http.createServer((request, response) => {
