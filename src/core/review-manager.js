@@ -89,6 +89,17 @@ function normalizeTypeList(value, fallback = DEFAULT_AUTO_APPLY_TYPES) {
     .filter(Boolean)));
 }
 
+function expandProposalTypes(types = []) {
+  return Array.from(new Set(types.flatMap((type) => {
+    const normalized = normalizeMutationType(type);
+    if (!normalized) {
+      return [];
+    }
+
+    return [normalized, `add_${normalized}`];
+  })));
+}
+
 function nextLocalTime(nowMs, hour, minute = 0) {
   const target = new Date(nowMs);
   target.setHours(hour, minute, 0, 0);
@@ -419,30 +430,30 @@ export class ReviewManager {
       return this.processReview(input);
     }
 
-    const listLimit = Math.max(1, Number(input.queueStats?.total ?? 0));
-    const actionableMutations = this.contextOS.reviewMutations({
-      action: "list",
-      actorId: this.actorId,
-      filters: {
-        limit: listLimit,
-      },
-    });
-    const parkedMutations = this.contextOS.reviewMutations({
-      action: "list",
-      actorId: this.actorId,
-      filters: {
-        includeParked: true,
-        triage: "parked_backlog",
-        limit: listLimit,
-      },
-    });
+    const parkedCount = Number(this.database.countGraphProposals({
+      statuses: ["pending", "proposed"],
+      queueBucket: "parked",
+    }) ?? 0);
     const reviewStartedAtMs = toTimestamp(input.reviewStartedAt) ?? this.now();
-    const autoApplyMutationIds = actionableMutations.mutations
-      .filter((mutation) => this._shouldAutoApplyMutation(mutation))
-      .map((mutation) => mutation.mutation_id);
-    const expiredParkedMutationIds = parkedMutations.mutations
-      .filter((mutation) => this._isExpiredParkedMutation(mutation, reviewStartedAtMs))
-      .map((mutation) => mutation.mutation_id);
+    const autoApplyProposalTypes = expandProposalTypes(this.autoApplyTypes);
+    const autoApplyMutationIds = autoApplyProposalTypes.length
+      ? this.database.listGraphProposals({
+        statuses: ["proposed"],
+        writeClasses: ["ai_proposed"],
+        minConfidence: this.autoApplyMinConfidence,
+        proposalTypes: autoApplyProposalTypes,
+        sort: "oldest",
+        limit: null,
+      }).map((row) => row.id)
+      : [];
+    const expiredCreatedBefore = new Date(reviewStartedAtMs - (this.autoExpireDays * DAY_IN_MS)).toISOString();
+    const expiredParkedMutationIds = this.database.listGraphProposals({
+      statuses: ["proposed"],
+      queueBucket: "parked",
+      createdBefore: expiredCreatedBefore,
+      sort: "oldest",
+      limit: null,
+    }).map((row) => row.id);
     const autoApplied = autoApplyMutationIds.length
       ? this.contextOS.reviewMutations({
         action: "apply_batch",
@@ -460,16 +471,19 @@ export class ReviewManager {
         actorId: this.actorId,
       })
       : this._emptyBatchReview("reject_batch", "rejected", autoExpireReason);
-    const remainingTotal = Math.max(0, actionableMutations.total + parkedMutations.total - autoApplied.count - autoExpired.count);
+    const parkedTotal = parkedCount;
+    const reviewedTotal = Math.max(0, Number(input.queueStats?.total ?? this.database.getPendingGraphProposalStats().total));
+    const actionableTotal = Math.max(0, reviewedTotal - parkedTotal);
+    const remainingTotal = Math.max(0, reviewedTotal - autoApplied.count - autoExpired.count);
     const autoApplyLabel = this.autoApplyTypes.length ? this.autoApplyTypes.join("/") : "configured";
 
     this._logInfo(`[review-manager] auto-applied ${autoApplied.count} ${autoApplyLabel} mutations, auto-expired ${autoExpired.count} parked mutations`);
 
     return {
       action: "auto_review_policy",
-      reviewed_total: actionableMutations.total + parkedMutations.total,
-      actionable_total: actionableMutations.total,
-      parked_total: parkedMutations.total,
+      reviewed_total: reviewedTotal,
+      actionable_total: actionableTotal,
+      parked_total: parkedTotal,
       remaining_total: remainingTotal,
       auto_apply_min_confidence: this.autoApplyMinConfidence,
       auto_apply_types: [...this.autoApplyTypes],
@@ -494,24 +508,6 @@ export class ReviewManager {
         remaining: remainingTotal,
       },
     };
-  }
-
-  _shouldAutoApplyMutation(mutation) {
-    const confidence = Number(mutation?.confidence ?? 0);
-    if (mutation?.triage !== "ai_review" || confidence < this.autoApplyMinConfidence) {
-      return false;
-    }
-
-    return this.autoApplyTypes.includes(normalizeMutationType(mutation.type));
-  }
-
-  _isExpiredParkedMutation(mutation, reviewStartedAtMs) {
-    const createdAtMs = toTimestamp(mutation?.created_at);
-    if (createdAtMs === null) {
-      return false;
-    }
-
-    return createdAtMs < (reviewStartedAtMs - (this.autoExpireDays * DAY_IN_MS));
   }
 
   _getAutoExpireReason() {

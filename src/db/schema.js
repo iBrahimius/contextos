@@ -276,6 +276,7 @@ CREATE TABLE IF NOT EXISTS claims (
 CREATE INDEX IF NOT EXISTS idx_claims_type_state ON claims(claim_type, lifecycle_state);
 CREATE INDEX IF NOT EXISTS idx_claims_subject ON claims(subject_entity_id);
 CREATE INDEX IF NOT EXISTS idx_claims_object ON claims(object_entity_id);
+CREATE INDEX IF NOT EXISTS idx_claims_observation ON claims(observation_id);
 CREATE INDEX IF NOT EXISTS idx_claims_resolution ON claims(resolution_key, facet_key);
 CREATE INDEX IF NOT EXISTS idx_claims_lifecycle ON claims(lifecycle_state);
 CREATE INDEX IF NOT EXISTS idx_claims_conversation ON claims(conversation_id);
@@ -369,6 +370,8 @@ CREATE TABLE IF NOT EXISTS graph_proposals (
 );
 
 CREATE INDEX IF NOT EXISTS idx_graph_proposals_status ON graph_proposals(status, created_at DESC);
+CREATE INDEX IF NOT EXISTS idx_graph_proposals_write_class ON graph_proposals(write_class, status);
+CREATE INDEX IF NOT EXISTS idx_graph_proposals_confidence ON graph_proposals(confidence, status);
 
 CREATE TABLE IF NOT EXISTS system_state (
   key TEXT PRIMARY KEY,

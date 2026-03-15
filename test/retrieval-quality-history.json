@@ -1254,72 +1254,72 @@
     ]
   },
   {
-    "timestamp": "2026-03-14T18:46:39.151Z",
+    "timestamp": "2026-03-15T12:35:35.668Z",
     "label": "baseline",
     "queryCount": 22,
-    "avgPrecisionAt5": 0.295,
-    "avgMRR": 0.482,
-    "passRate": 0.545,
-    "artifactLeakRate": 0.182,
+    "avgPrecisionAt5": 0.436,
+    "avgMRR": 0.652,
+    "passRate": 0.727,
+    "artifactLeakRate": 0.091,
     "p50LatencyMs": null,
     "p95LatencyMs": null,
-    "totalDurationMs": 5601,
+    "totalDurationMs": 4669,
     "byIntent": {
       "simple": {
         "count": 8,
-        "avgPrecision": 0.292,
-        "avgMRR": 0.325,
-        "passRate": 0.375,
-        "artifactLeakRate": 0.125
+        "avgPrecision": 0.656,
+        "avgMRR": 0.781,
+        "passRate": 0.75,
+        "artifactLeakRate": 0.25
       },
       "hybrid": {
         "count": 8,
-        "avgPrecision": 0.219,
-        "avgMRR": 0.463,
-        "passRate": 0.625,
-        "artifactLeakRate": 0.25
+        "avgPrecision": 0.302,
+        "avgMRR": 0.563,
+        "passRate": 0.75,
+        "artifactLeakRate": 0
       },
       "deep": {
         "count": 6,
-        "avgPrecision": 0.403,
-        "avgMRR": 0.717,
+        "avgPrecision": 0.319,
+        "avgMRR": 0.597,
         "passRate": 0.667,
-        "artifactLeakRate": 0.167
+        "artifactLeakRate": 0
       }
     },
     "byRoute": {
       "current_state": {
         "count": 7,
-        "avgPrecision": 0.274,
-        "avgMRR": 0.371,
-        "passRate": 0.429,
-        "artifactLeakRate": 0.143
+        "avgPrecision": 0.607,
+        "avgMRR": 0.893,
+        "passRate": 0.857,
+        "artifactLeakRate": 0
       },
       "history_temporal": {
         "count": 6,
-        "avgPrecision": 0.306,
-        "avgMRR": 0.45,
-        "passRate": 0.667,
-        "artifactLeakRate": 0.333
+        "avgPrecision": 0.181,
+        "avgMRR": 0.333,
+        "passRate": 0.5,
+        "artifactLeakRate": 0.167
       },
       "why_explanatory": {
         "count": 3,
-        "avgPrecision": 0.556,
-        "avgMRR": 1,
+        "avgPrecision": 0.389,
+        "avgMRR": 0.778,
         "passRate": 1,
-        "artifactLeakRate": 0.333
+        "artifactLeakRate": 0
       },
       "entity_state": {
         "count": 3,
-        "avgPrecision": 0.111,
-        "avgMRR": 0.333,
-        "passRate": 0.333,
-        "artifactLeakRate": 0
+        "avgPrecision": 0.778,
+        "avgMRR": 0.833,
+        "passRate": 1,
+        "artifactLeakRate": 0.333
       },
       "mixed": {
         "count": 3,
         "avgPrecision": 0.25,
-        "avgMRR": 0.433,
+        "avgMRR": 0.417,
         "passRate": 0.333,
         "artifactLeakRate": 0
       }
@@ -1330,54 +1330,55 @@
         "intent": "simple",
         "route": "current_state",
         "precisionAt5": 0,
-        "mrr": 0,
-        "pass": false,
+        "mrr": 1,
+        "pass": true,
         "typeMatch": false,
-        "artifactViolations": [
-          "term:telemetry",
-          "term:contextos.db",
-          "term:launchd",
-          "term:contextos_telemetry.db"
-        ],
+        "artifactViolations": [],
         "familyCounts": {
-          "canonical": 5
+          "fts": 4,
+          "canonical": 1
         }
       },
       {
         "id": "simple-02",
         "intent": "simple",
         "route": "entity_state",
-        "precisionAt5": 0,
-        "mrr": 0,
-        "pass": false,
+        "precisionAt5": 1,
+        "mrr": 1,
+        "pass": true,
         "typeMatch": false,
         "artifactViolations": [],
-        "familyCounts": {}
+        "familyCounts": {
+          "fts": 3,
+          "vector": 2
+        }
       },
       {
         "id": "simple-03",
         "intent": "simple",
         "route": "current_state",
-        "precisionAt5": 0,
-        "mrr": 0,
-        "pass": false,
-        "typeMatch": false,
+        "precisionAt5": 1,
+        "mrr": 1,
+        "pass": true,
+        "typeMatch": true,
         "artifactViolations": [],
         "familyCounts": {
-          "canonical": 5
+          "canonical": 3,
+          "fts": 2
         }
       },
       {
         "id": "simple-04",
         "intent": "simple",
         "route": "current_state",
-        "precisionAt5": 0,
-        "mrr": 0.1,
-        "pass": false,
+        "precisionAt5": 1,
+        "mrr": 1,
+        "pass": true,
         "typeMatch": false,
         "artifactViolations": [],
         "familyCounts": {
-          "canonical": 5
+          "fts": 2,
+          "canonical": 3
         }
       },
       {
@@ -1388,53 +1389,17 @@
         "mrr": 1,
         "pass": true,
         "typeMatch": false,
-        "artifactViolations": [],
+        "artifactViolations": [
+          "term:launchd"
+        ],
         "familyCounts": {
-          "canonical": 5
+          "canonical": 4,
+          "fts": 1
         }
       },
       {
         "id": "simple-06",
         "intent": "simple",
-        "route": "current_state",
-        "precisionAt5": 1,
-        "mrr": 0.5,
-        "pass": true,
-        "typeMatch": false,
-        "artifactViolations": [],
-        "familyCounts": {
-          "canonical": 5
-        }
-      },
-      {
-        "id": "simple-07",
-        "intent": "simple",
-        "route": "current_state",
-        "precisionAt5": 0,
-        "mrr": 0,
-        "pass": false,
-        "typeMatch": false,
-        "artifactViolations": [],
-        "familyCounts": {
-          "canonical": 5
-        }
-      },
-      {
-        "id": "hybrid-01",
-        "intent": "hybrid",
-        "route": "history_temporal",
-        "precisionAt5": 0.333,
-        "mrr": 0.5,
-        "pass": true,
-        "typeMatch": false,
-        "artifactViolations": [],
-        "familyCounts": {
-          "canonical": 5
-        }
-      },
-      {
-        "id": "hybrid-02",
-        "intent": "hybrid",
         "route": "current_state",
         "precisionAt5": 0.667,
         "mrr": 1,
@@ -1442,32 +1407,73 @@
         "typeMatch": false,
         "artifactViolations": [],
         "familyCounts": {
-          "canonical": 5
+          "fts": 4,
+          "canonical": 1
+        }
+      },
+      {
+        "id": "simple-07",
+        "intent": "simple",
+        "route": "current_state",
+        "precisionAt5": 1,
+        "mrr": 0.25,
+        "pass": false,
+        "typeMatch": true,
+        "artifactViolations": [],
+        "familyCounts": {
+          "canonical": 4,
+          "fts": 1
+        }
+      },
+      {
+        "id": "hybrid-01",
+        "intent": "hybrid",
+        "route": "history_temporal",
+        "precisionAt5": 0.333,
+        "mrr": 1,
+        "pass": true,
+        "typeMatch": false,
+        "artifactViolations": [],
+        "familyCounts": {
+          "fts": 3,
+          "canonical": 2
+        }
+      },
+      {
+        "id": "hybrid-02",
+        "intent": "hybrid",
+        "route": "current_state",
+        "precisionAt5": 0.333,
+        "mrr": 1,
+        "pass": true,
+        "typeMatch": false,
+        "artifactViolations": [],
+        "familyCounts": {
+          "canonical": 4,
+          "fts": 1
         }
       },
       {
         "id": "hybrid-03",
         "intent": "hybrid",
         "route": "history_temporal",
-        "precisionAt5": 0,
-        "mrr": 0.2,
-        "pass": false,
+        "precisionAt5": 0.25,
+        "mrr": 1,
+        "pass": true,
         "typeMatch": false,
-        "artifactViolations": [
-          "term:audit"
-        ],
+        "artifactViolations": [],
         "familyCounts": {
-          "canonical": 5
+          "fts": 5
         }
       },
       {
         "id": "hybrid-04",
         "intent": "hybrid",
         "route": "history_temporal",
-        "precisionAt5": 0.25,
-        "mrr": 1,
-        "pass": true,
-        "typeMatch": true,
+        "precisionAt5": 0,
+        "mrr": 0,
+        "pass": false,
+        "typeMatch": false,
         "artifactViolations": [],
         "familyCounts": {
           "conversational": 5
@@ -1483,20 +1489,22 @@
         "typeMatch": false,
         "artifactViolations": [],
         "familyCounts": {
-          "canonical": 5
+          "fts": 4,
+          "canonical": 1
         }
       },
       {
         "id": "hybrid-06",
         "intent": "hybrid",
         "route": "entity_state",
-        "precisionAt5": 0,
-        "mrr": 0,
-        "pass": false,
-        "typeMatch": false,
+        "precisionAt5": 1,
+        "mrr": 0.5,
+        "pass": true,
+        "typeMatch": true,
         "artifactViolations": [],
         "familyCounts": {
-          "canonical": 5
+          "canonical": 4,
+          "vector": 1
         }
       },
       {
@@ -1509,7 +1517,8 @@
         "typeMatch": false,
         "artifactViolations": [],
         "familyCounts": {
-          "canonical": 5
+          "fts": 1,
+          "canonical": 4
         }
       },
       {
@@ -1519,23 +1528,25 @@
         "precisionAt5": 0.667,
         "mrr": 1,
         "pass": true,
-        "typeMatch": false,
+        "typeMatch": true,
         "artifactViolations": [],
         "familyCounts": {
-          "conversational": 5
+          "canonical": 1,
+          "fts": 4
         }
       },
       {
         "id": "deep-02",
         "intent": "deep",
         "route": "why_explanatory",
-        "precisionAt5": 0.5,
-        "mrr": 1,
+        "precisionAt5": 0.25,
+        "mrr": 0.333,
         "pass": true,
         "typeMatch": false,
         "artifactViolations": [],
         "familyCounts": {
-          "conversational": 5
+          "fts": 3,
+          "canonical": 2
         }
       },
       {
@@ -1548,7 +1559,8 @@
         "typeMatch": false,
         "artifactViolations": [],
         "familyCounts": {
-          "canonical": 5
+          "canonical": 4,
+          "fts": 1
         }
       },
       {
@@ -1556,9 +1568,9 @@
         "intent": "deep",
         "route": "mixed",
         "precisionAt5": 0,
-        "mrr": 0.1,
+        "mrr": 0,
         "pass": false,
-        "typeMatch": false,
+        "typeMatch": true,
         "artifactViolations": [],
         "familyCounts": {
           "canonical": 5
@@ -1568,16 +1580,14 @@
         "id": "deep-05",
         "intent": "deep",
         "route": "why_explanatory",
-        "precisionAt5": 0.5,
+        "precisionAt5": 0.25,
         "mrr": 1,
         "pass": true,
         "typeMatch": false,
-        "artifactViolations": [
-          "term:audit",
-          "term:benchmark"
-        ],
+        "artifactViolations": [],
         "familyCounts": {
-          "conversational": 5
+          "canonical": 4,
+          "fts": 1
         }
       },
       {
@@ -1585,12 +1595,13 @@
         "intent": "deep",
         "route": "mixed",
         "precisionAt5": 0.75,
-        "mrr": 0.2,
+        "mrr": 0.25,
         "pass": false,
         "typeMatch": false,
         "artifactViolations": [],
         "familyCounts": {
-          "canonical": 5
+          "fts": 4,
+          "canonical": 1
         }
       },
       {
@@ -1600,10 +1611,8 @@
         "precisionAt5": 0,
         "mrr": 0,
         "pass": true,
-        "typeMatch": true,
-        "artifactViolations": [
-          "term:telemetry"
-        ],
+        "typeMatch": false,
+        "artifactViolations": [],
         "familyCounts": {
           "conversational": 5
         }
@@ -1612,11 +1621,13 @@
         "id": "temporal-02",
         "intent": "simple",
         "route": "history_temporal",
-        "precisionAt5": 1,
-        "mrr": 1,
-        "pass": true,
+        "precisionAt5": 0.25,
+        "mrr": 0,
+        "pass": false,
         "typeMatch": true,
-        "artifactViolations": [],
+        "artifactViolations": [
+          "term:launchd"
+        ],
         "familyCounts": {
           "conversational": 5
         }
