@@ -1,15 +1,22 @@
 import fs from "node:fs";
 import path from "node:path";
+import { performance } from "node:perf_hooks";
 import { DatabaseSync } from "node:sqlite";
 
 import { SCHEMA } from "./schema.js";
 import { paginateResults, paginationClause } from "../core/pagination.js";
 import { validateLifecycleTransition } from "../core/claim-resolution.js";
 import { isValidLifecycleState } from "../core/claim-types.js";
+import { AI_PROPOSED_PARKING_THRESHOLD } from "../core/write-discipline.js";
 import { createId, nowIso, parseJson, slugify, stableJson } from "../core/utils.js";
 
 const SCOPE_ORDER = ["private", "project", "shared", "public"];
 const DEFAULT_EMBEDDING_MODEL = "embeddinggemma-300m";
+
+function normalizeQueueBucket(value) {
+  const normalized = String(value ?? "").trim().toLowerCase();
+  return ["actionable", "parked", "not_queued"].includes(normalized) ? normalized : null;
+}
 
 function serializeEmbedding(embedding) {
   if (!embedding) {
@@ -395,7 +402,10 @@ const SCHEMA_INDEXES = [
   `CREATE INDEX IF NOT EXISTS idx_constraints_entity_created ON constraints(entity_id, created_at DESC) WHERE entity_id IS NOT NULL`,
   `CREATE INDEX IF NOT EXISTS idx_facts_entity_created ON facts(entity_id, created_at DESC) WHERE entity_id IS NOT NULL`,
   `CREATE INDEX IF NOT EXISTS idx_chunk_entities_entity ON chunk_entities(entity_id)`,
+  `CREATE INDEX IF NOT EXISTS idx_claims_observation ON claims(observation_id)`,
   `CREATE INDEX IF NOT EXISTS idx_graph_proposals_created ON graph_proposals(created_at DESC)`,
+  `CREATE INDEX IF NOT EXISTS idx_graph_proposals_write_class ON graph_proposals(write_class, status)`,
+  `CREATE INDEX IF NOT EXISTS idx_graph_proposals_confidence ON graph_proposals(confidence, status)`,
 ];
 
 export class ContextDatabase {
@@ -423,13 +433,21 @@ export class ContextDatabase {
       this._openDev = null;
     }
 
+    const t0 = performance.now();
     this.applyTableMigrations();
+    const t1 = performance.now();
     this.sqlite.exec(SCHEMA);
+    const t2 = performance.now();
     this.statements = new Map();
     this._stmtMaxSize = 500;
     this.applyIndexMigrations();
+    const t3 = performance.now();
     this.backfillObservationFts();
+    const t4 = performance.now();
     this.backfillClaimsFts();
+    const t5 = performance.now();
+
+    console.log(`[db] Startup complete in ${(t5 - t0).toFixed(0)}ms (migrations: ${(t1 - t0).toFixed(0)}ms, schema: ${(t2 - t1).toFixed(0)}ms, indexes: ${(t3 - t2).toFixed(0)}ms, fts-backfill: ${(t5 - t3).toFixed(0)}ms)`);
   }
 
   hasTable(tableName) {
@@ -473,7 +491,13 @@ export class ContextDatabase {
   }
 
   backfillObservationFts() {
-    if (!this.hasTable("observations")) {
+    if (!this.hasTable("observations") || !this.hasTable("observation_fts") || !this.hasTable("observation_fts_content")) {
+      return;
+    }
+
+    const observationCount = Number(this.prepare(`SELECT COUNT(*) AS count FROM observations`).get()?.count ?? 0);
+    const ftsCount = Number(this.prepare(`SELECT COUNT(*) AS count FROM observation_fts_content`).get()?.count ?? 0);
+    if (ftsCount >= observationCount) {
       return;
     }
 
@@ -481,8 +505,7 @@ export class ContextDatabase {
       INSERT INTO observation_fts (observation_id, category, content)
       SELECT o.id, o.category, o.detail
       FROM observations o
-      LEFT JOIN observation_fts fts ON fts.observation_id = o.id
-      WHERE fts.observation_id IS NULL
+      WHERE o.id NOT IN (SELECT c0 FROM observation_fts_content)
     `).run();
   }
 
@@ -593,7 +616,17 @@ export class ContextDatabase {
   }
 
   backfillClaimsFts() {
-    if (!this.hasTable("claims") || !this.hasTable("claims_fts")) {
+    if (!this.hasTable("claims") || !this.hasTable("claims_fts") || !this.hasTable("claims_fts_content")) {
+      return;
+    }
+
+    const claimCount = Number(this.prepare(`
+      SELECT COUNT(*) AS count
+      FROM claims
+      WHERE value_text IS NOT NULL
+    `).get()?.count ?? 0);
+    const ftsCount = Number(this.prepare(`SELECT COUNT(*) AS count FROM claims_fts_content`).get()?.count ?? 0);
+    if (ftsCount >= claimCount) {
       return;
     }
 
@@ -601,8 +634,8 @@ export class ContextDatabase {
       INSERT INTO claims_fts (claim_id, claim_type, content)
       SELECT c.id, c.claim_type, c.value_text
       FROM claims c
-      LEFT JOIN claims_fts fts ON fts.claim_id = c.id
-      WHERE fts.claim_id IS NULL AND c.value_text IS NOT NULL
+      WHERE c.value_text IS NOT NULL
+        AND c.id NOT IN (SELECT c0 FROM claims_fts_content)
     `).run();
   }
 
@@ -3626,6 +3659,8 @@ export class ContextDatabase {
     sourceEventId = null,
     minConfidence = null,
     maxConfidence = null,
+    queueBucket = null,
+    createdBefore = null,
     sort = "newest",
     limit = 100,
   } = {}) {
@@ -3684,6 +3719,29 @@ export class ContextDatabase {
     if (hasMaxConfidence && Number.isFinite(normalizedMaxConfidence)) {
       clauses.push(`gp.confidence <= ?`);
       params.push(normalizedMaxConfidence);
+    }
+
+    const normalizedQueueBucket = normalizeQueueBucket(queueBucket);
+    if (normalizedQueueBucket === "actionable") {
+      clauses.push(`gp.status IN ('pending', 'proposed')`);
+      clauses.push(`(
+        gp.write_class IN ('auto', 'canonical')
+        OR (gp.write_class = 'ai_proposed' AND gp.confidence >= ?)
+      )`);
+      params.push(AI_PROPOSED_PARKING_THRESHOLD);
+    } else if (normalizedQueueBucket === "parked") {
+      clauses.push(`gp.status IN ('pending', 'proposed')`);
+      clauses.push(`gp.write_class = 'ai_proposed'`);
+      clauses.push(`gp.confidence < ?`);
+      params.push(AI_PROPOSED_PARKING_THRESHOLD);
+    } else if (normalizedQueueBucket === "not_queued") {
+      clauses.push(`gp.status NOT IN ('pending', 'proposed')`);
+    }
+
+    const normalizedCreatedBefore = String(createdBefore ?? "").trim();
+    if (normalizedCreatedBefore) {
+      clauses.push(`gp.created_at < ?`);
+      params.push(normalizedCreatedBefore);
     }
 
     const whereClause = clauses.length ? `WHERE ${clauses.join(" AND ")}` : "";

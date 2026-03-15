@@ -49,12 +49,38 @@ test("Database includes all required indexes", async () => {
       "idx_constraints_entity_created",
       "idx_facts_entity_created",
       "idx_chunk_entities_entity",
+      "idx_claims_observation",
       "idx_graph_proposals_created",
+      "idx_graph_proposals_write_class",
+      "idx_graph_proposals_confidence",
     ];
 
     for (const idx of required) {
       assert.ok(indexes.includes(idx), `Missing index: ${idx}`);
     }
+  } finally {
+    await cleanupDB(db, tmpDir);
+  }
+});
+
+test("SQL performance hardening indexes exist in sqlite_master", async () => {
+  const { db, tmpDir } = await createTestDB();
+
+  try {
+    const indexes = getIndexes(db);
+
+    assert.deepEqual(
+      [
+        "idx_claims_observation",
+        "idx_graph_proposals_write_class",
+        "idx_graph_proposals_confidence",
+      ].filter((name) => indexes.includes(name)),
+      [
+        "idx_claims_observation",
+        "idx_graph_proposals_write_class",
+        "idx_graph_proposals_confidence",
+      ],
+    );
   } finally {
     await cleanupDB(db, tmpDir);
   }
